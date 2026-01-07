@@ -6,18 +6,24 @@ import { GoogleAnalytics } from '@next/third-parties/google'
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  // 1. 标题优化：包含核心关键词 "双色球" "随机" "选号器"
-  title: "欧气选号机 - 免费在线双色球随机选号工具 | 模拟摇奖",
-  // 2. 描述优化：吸引用户点击的文案
-  description: "一款基于加密级真随机算法的双色球选号工具。拒绝伪随机，在线模拟真实摇奖，自动同步最新开奖数据，助你吸取欧气，提升中奖概率。",
-  // 3. 关键词：告诉爬虫你的核心业务
-  keywords: "双色球, 选号器, 随机选号, 彩票工具, 模拟摇奖, 欧气生成器, 今天的幸运数字",
-  // 4. 移动端优化
-  viewport: "width=device-width, initial-scale=1, maximum-scale=1",
-  // 5. 作者/站长信息
-  authors: [{ name: "Lucky Station Master" }],
+  title: "欧气选号机 - 免费在线双色球随机选号工具",
+  description: "一款基于加密级真随机算法的双色球选号工具...",
+  manifest: "/manifest.json", // 显式链接 manifest
+  themeColor: "#0f172a",      // 顶部状态栏颜色
+  // iOS 专用配置
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "欧气选号",
+  },
+  // 视口配置，禁止用户缩放，像APP一样
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false, 
+  },
 };
-
 export default function RootLayout({
   children,
 }: Readonly<{
