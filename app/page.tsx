@@ -24,7 +24,7 @@ export default function Home() {
   const [blueBall, setBlueBall] = useState<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  
+
   // 新增：真实开奖数据状态
   const [latestDraw, setLatestDraw] = useState<DrawData | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -96,8 +96,8 @@ export default function Home() {
       if (isWin) triggerConfetti();
 
       const newRecord = {
-        red: newReds, 
-        blue: newBlue, 
+        red: newReds,
+        blue: newBlue,
         date: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
         isWin
       };
@@ -118,11 +118,11 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col items-center relative overflow-x-hidden pb-10">
-      
+
       {/* 顶部实时开奖横幅 (真实数据) */}
       <div className="w-full bg-slate-900 text-white py-3 px-4 text-sm font-medium flex justify-center items-center shadow-md">
         {isLoadingData ? (
-          <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin"/> 正在同步福彩中心数据...</span>
+          <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 正在同步福彩中心数据...</span>
         ) : latestDraw ? (
           <div className="flex flex-wrap justify-center gap-2 items-center animate-in fade-in">
             <span className="text-slate-400">第 {latestDraw.issue} 期开奖:</span>
@@ -158,11 +158,11 @@ export default function Home() {
         {/* 核心选号区 */}
         <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl border border-slate-100 w-full mb-8 relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-50 to-orange-50 rounded-full -mr-16 -mt-16 z-0 transition-transform group-hover:scale-110 duration-700"></div>
-          
+
           <div className="relative z-10">
             <div className="flex flex-wrap justify-center gap-3 sm:gap-4 mb-8 min-h-[60px]">
               {redBalls.length > 0 ? redBalls.map((num, idx) => (
-                <div 
+                <div
                   key={`red-${idx}`}
                   className={`w-11 h-11 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-xl font-bold shadow-inner
                     ${isAnimating ? 'animate-bounce' : 'animate-in zoom-in duration-300'}
@@ -178,7 +178,7 @@ export default function Home() {
               )}
 
               {blueBall !== null && (
-                <div 
+                <div
                   className={`w-11 h-11 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-xl font-bold shadow-inner ml-2 sm:ml-4
                   ${isAnimating ? 'animate-bounce' : 'animate-in zoom-in duration-500'}
                   bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-blue-200 ring-2 ring-blue-100`}
@@ -190,7 +190,7 @@ export default function Home() {
             </div>
 
             <div className="flex justify-center">
-              <button 
+              <button
                 onClick={generateNumbers}
                 disabled={isAnimating}
                 className="group relative flex items-center gap-2 px-8 py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-bold text-lg transition-all shadow-lg hover:shadow-2xl hover:-translate-y-1 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed overflow-hidden w-full sm:w-auto justify-center"
@@ -199,6 +199,15 @@ export default function Home() {
                 <RefreshCw className={`w-5 h-5 ${isAnimating ? 'animate-spin' : ''}`} />
                 {isAnimating ? '正在计算运势...' : '一键生成'}
               </button>
+
+              {/* --- 黄金广告位 (AdSense Placeholder) --- */}
+              <div className="mt-8 w-full h-24 bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 gap-1 overflow-hidden relative">
+                <span className="text-xs font-mono uppercase tracking-widest">Sponsored / 广告位</span>
+                <span className="text-[10px] opacity-70">Google Adsense Display Area</span>
+                {/* 装饰线条，让它看起来不那么丑 */}
+                <div className="absolute -right-4 -bottom-4 w-12 h-12 bg-slate-200 rounded-full opacity-50"></div>
+              </div>
+              {/* -------------------------------------- */}
             </div>
           </div>
         </div>
@@ -206,24 +215,24 @@ export default function Home() {
         {/* 历史记录区 */}
         <div className="w-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
-             <h3 className="text-slate-500 font-bold text-xs uppercase tracking-wider">选号记录</h3>
-             {history.length > 0 && (
-                <button onClick={() => {setHistory([]); localStorage.removeItem('lottery-history')}} className="text-xs text-red-400 hover:text-red-600">
-                  清空
-                </button>
-             )}
+            <h3 className="text-slate-500 font-bold text-xs uppercase tracking-wider">选号记录</h3>
+            {history.length > 0 && (
+              <button onClick={() => { setHistory([]); localStorage.removeItem('lottery-history') }} className="text-xs text-red-400 hover:text-red-600">
+                清空
+              </button>
+            )}
           </div>
-          
+
           <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
             {history.length === 0 && (
               <div className="text-center text-slate-300 text-sm py-8 flex flex-col items-center gap-2">
-                <Copy className="w-8 h-8 opacity-20"/>
+                <Copy className="w-8 h-8 opacity-20" />
                 暂无记录
               </div>
             )}
             {history.map((item, idx) => (
-              <div 
-                key={idx} 
+              <div
+                key={idx}
                 className={`p-4 flex justify-between items-center hover:bg-slate-50 transition-colors
                   ${item.isWin ? 'bg-yellow-50/50' : ''}`}
               >
@@ -241,7 +250,7 @@ export default function Home() {
                   </div>
                   <div className="text-[10px] text-slate-400 flex items-center gap-2">
                     {item.date}
-                    {item.isWin && <span className="text-yellow-600 font-bold flex items-center gap-1 bg-yellow-100 px-1.5 py-0.5 rounded-full"><Trophy className="w-3 h-3"/> 疑似中奖</span>}
+                    {item.isWin && <span className="text-yellow-600 font-bold flex items-center gap-1 bg-yellow-100 px-1.5 py-0.5 rounded-full"><Trophy className="w-3 h-3" /> 疑似中奖</span>}
                   </div>
                 </div>
               </div>
