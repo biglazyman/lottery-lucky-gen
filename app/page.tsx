@@ -1,70 +1,49 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Sparkles, Trophy, Loader2, Calendar, Clock, AlertCircle, Zap, Timer, UserCircle2, WifiOff } from 'lucide-react';
+import { RefreshCw, Sparkles, Loader2, Calendar, Clock, AlertCircle, Zap, Timer, History, Trash2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 // --- 类型定义 ---
 type DrawData = {
   issue: string;
-  red: number[];
-  blue: number;
   date: string;
   week: string;
+  red: number[];
+  blue: number;
 };
 
+// 奖级: 1=一等奖 ... 6=六等奖
 type PrizeLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 type HistoryItem = {
   red: number[];
   blue: number;
   date: string;
-  prizeLevel: PrizeLevel;
+  prizeLevel: PrizeLevel; // 仅作为参考：该号码如果买上一期能中多少
   winIssue?: string;
-  forIssue: string;
+  forIssue: string; // 该号码是为哪一期生成的
 };
-
-type LinkedWinner = {
-  user: string;
-  prizeLevel: 1 | 2;
-};
-
-const FUN_NAMES = [
-  "皮卡丘", "妙蛙种子", "小火龙", "杰尼龟", "胖丁", "可达鸭", "卡比兽", "超梦",
-  "双色球大师", "红蓝球球", "欧气训练家", "幸运红球", "蓝球猎手",
-  "锦鲤本鲤", "欧皇附体", "发财猫", "旺财", "好运来"
-];
 
 export default function Home() {
+  // 核心选号状态
   const [redBalls, setRedBalls] = useState<number[]>([0,0,0,0,0,0]);
   const [blueBall, setBlueBall] = useState<number>(0);
   const [isRolling, setIsRolling] = useState(false);
   
-  // 核心数据状态
+  // 数据状态
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [drawsList, setDrawsList] = useState<DrawData[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
-  const [isError, setIsError] = useState(false); // 新增：错误状态
-
-  const [winnersMap, setWinnersMap] = useState<Record<string, LinkedWinner>>({});
+  
+  // 下一期信息
   const [nextIssueInfo, setNextIssueInfo] = useState({ issue: '---', deadline: '---' });
   const [currentTime, setCurrentTime] = useState<string>('');
-  const [username, setUsername] = useState<string>('加载中...');
-
+  
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // 1. 用户身份
-    let storedName = localStorage.getItem('lottery-username');
-    if (!storedName) {
-      const randomName = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
-      const suffix = Math.floor(Math.random() * 999) + 1;
-      storedName = `${randomName} No.${suffix}`;
-      localStorage.setItem('lottery-username', storedName);
-    }
-    setUsername(storedName);
-
-    // 2. 时钟
+    // 1. 启动时钟
     const updateTime = () => {
       const now = new Date();
       setCurrentTime(now.toLocaleTimeString('zh-CN', { hour12: false }));
@@ -72,77 +51,58 @@ export default function Home() {
     updateTime();
     const timer = setInterval(updateTime, 1000);
 
-    // 3. 加载本地历史
+    // 2. 加载本地历史
     const saved = localStorage.getItem('lottery-history');
     if (saved) setHistory(JSON.parse(saved));
 
-    // 4. 获取真实数据
+    // 3. 获取真实数据
     fetch('/api/lottery')
+      .then(res => res.json())
       .then(res => {
-        if (!res.ok) throw new Error('Network response was not ok');
-        return res.json();
-      })
-      .then(res => {
-        if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {
+        if (res.success && res.data && Array.isArray(res.data)) {
           setDrawsList(res.data);
-          generateFakeWinners(res.data);
-          calculateNextIssueReal(res.data[0]); // 使用严谨计算
-        } else {
-          throw new Error('Data format error or empty');
+          calculateNextIssueReal(res.data[0]);
         }
       })
-      .catch(err => {
-        console.error('API Error:', err);
-        setIsError(true); // 标记错误，不再显示假数据
-      })
+      .catch(err => console.error('API Error:', err))
       .finally(() => setIsLoadingData(false));
 
     return () => clearInterval(timer);
   }, []);
 
+  // 同步历史到本地存储
   useEffect(() => {
     if (history.length > 0) localStorage.setItem('lottery-history', JSON.stringify(history));
   }, [history]);
 
-  // --- 严谨的下一期计算逻辑 ---
-  // 双色球开奖时间：周二、四、日 21:15
-  // 销售截止时间：当天 20:00
+  // 计算下一期信息
   const calculateNextIssueReal = (latestDraw: DrawData) => {
     if (!latestDraw) return;
     
-    // 1. 推算期号 (简单+1，处理跨年需更复杂逻辑，此处暂用+1)
-    // 真实场景通常需要后端给nextIssue，如果没有，我们只能基于最新期号+1
+    // 简单推算下一期 (注意：跨年需特殊处理，此处简化为+1)
     const currentIssueNum = parseInt(latestDraw.issue);
     const nextIssue = (currentIssueNum + 1).toString();
 
-    // 2. 推算截止时间
+    // 推算截止时间
     const now = new Date();
     const currentDay = now.getDay(); // 0-6 (Sun-Sat)
     const currentHour = now.getHours();
 
-    // 定义开奖日：周二(2)、周四(4)、周日(0)
-    // 如果今天是开奖日，且还没到20:00，那下一期就是【今天】
+    // 开奖日：周二(2)、周四(4)、周日(0)
     let daysToAdd = 0;
     const isDrawDay = [0, 2, 4].includes(currentDay);
     
+    // 如果今天是开奖日且未过20:00，则是今天，否则找下一个开奖日
     if (isDrawDay && currentHour < 20) {
-      daysToAdd = 0; // 就是今天
+      daysToAdd = 0; 
     } else {
-      // 找下一个开奖日
-      // Sun(0) -> Tue(2) (+2)
-      // Mon(1) -> Tue(2) (+1)
-      // Tue(2) -> Thu(4) (+2)
-      // Wed(3) -> Thu(4) (+1)
-      // Thu(4) -> Sun(0) (+3)
-      // Fri(5) -> Sun(0) (+2)
-      // Sat(6) -> Sun(0) (+1)
-      if (currentDay === 0) daysToAdd = 2;
-      else if (currentDay === 1) daysToAdd = 1;
-      else if (currentDay === 2) daysToAdd = 2;
-      else if (currentDay === 3) daysToAdd = 1;
-      else if (currentDay === 4) daysToAdd = 3;
-      else if (currentDay === 5) daysToAdd = 2;
-      else if (currentDay === 6) daysToAdd = 1;
+      if (currentDay === 0) daysToAdd = 2; // Sun -> Tue
+      else if (currentDay === 1) daysToAdd = 1; // Mon -> Tue
+      else if (currentDay === 2) daysToAdd = 2; // Tue -> Thu
+      else if (currentDay === 3) daysToAdd = 1; // Wed -> Thu
+      else if (currentDay === 4) daysToAdd = 3; // Thu -> Sun
+      else if (currentDay === 5) daysToAdd = 2; // Fri -> Sun
+      else if (currentDay === 6) daysToAdd = 1; // Sat -> Sun
     }
 
     const nextDate = new Date();
@@ -154,22 +114,7 @@ export default function Home() {
     setNextIssueInfo({ issue: nextIssue, deadline: deadlineStr });
   };
 
-  const generateFakeWinners = (draws: DrawData[]) => {
-    const map: Record<string, LinkedWinner> = {};
-    // 仅基于真实数据生成趣味喜报
-    const assignWinner = (idx: number, level: 1 | 2) => {
-       if (idx < draws.length) {
-         const randomName = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
-         const suffix = Math.floor(Math.random() * 999) + 1; 
-         map[draws[idx].issue] = { user: `${randomName} No.${suffix}`, prizeLevel: level };
-       }
-    };
-    assignWinner(0, 1);
-    assignWinner(2, 2);
-    assignWinner(4, 1);
-    setWinnersMap(map);
-  };
-
+  // 真随机算法
   const getTrueRandom = (min: number, max: number, exclude: number[] = []) => {
     const range = max - min + 1;
     const array = new Uint32Array(1);
@@ -181,11 +126,13 @@ export default function Home() {
     return randomNum;
   };
 
+  // 计算参考奖级 (仅用于显示“若买上期可中XXX”)
   const calculatePrize = (red: number[], blue: number): PrizeLevel => {
     if (drawsList.length === 0) return 0;
     const latest = drawsList[0];
     const redHits = red.filter(r => latest.red.includes(r)).length;
     const blueHit = blue === latest.blue;
+
     if (redHits === 6 && blueHit) return 1;
     if (redHits === 6 && !blueHit) return 2;
     if (redHits === 5 && blueHit) return 3;
@@ -202,6 +149,7 @@ export default function Home() {
        setRedBalls(Array(6).fill(0).map(() => Math.floor(Math.random() * 33) + 1));
        setBlueBall(Math.floor(Math.random() * 16) + 1);
     }, 50);
+
     setTimeout(() => {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
       const finalReds: number[] = [];
@@ -211,15 +159,24 @@ export default function Home() {
       }
       finalReds.sort((a, b) => a - b);
       const finalBlue = getTrueRandom(1, 16);
+
       setRedBalls(finalReds);
       setBlueBall(finalBlue);
       setIsRolling(false);
+
       const prizeLevel = calculatePrize(finalReds, finalBlue);
-      if (prizeLevel > 0) triggerConfetti();
+      // 只有中大奖才撒花，增加稀缺感
+      if (prizeLevel > 0 && prizeLevel <= 3) triggerConfetti();
+
       const newRecord: HistoryItem = {
-        red: finalReds, blue: finalBlue, date: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        prizeLevel, winIssue: prizeLevel > 0 && drawsList.length > 0 ? drawsList[0].issue : undefined, forIssue: nextIssueInfo.issue
+        red: finalReds, 
+        blue: finalBlue, 
+        date: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        prizeLevel, 
+        winIssue: prizeLevel > 0 && drawsList.length > 0 ? drawsList[0].issue : undefined, 
+        forIssue: nextIssueInfo.issue
       };
+
       setHistory(prev => [newRecord, ...prev].slice(0, 50));
     }, 800);
   };
@@ -228,89 +185,53 @@ export default function Home() {
     confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#ef4444', '#3b82f6', '#fbbf24'] });
   };
 
-  const getPrizeBadge = (level: PrizeLevel) => {
-    switch (level) {
-      case 1: return <span className="text-white bg-red-500 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm">一等奖</span>;
-      case 2: return <span className="text-white bg-orange-500 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm">二等奖</span>;
-      case 3: return <span className="text-yellow-700 bg-yellow-100 border border-yellow-200 px-2 py-0.5 rounded-full text-[10px] font-bold">三等奖</span>;
-      case 4: return <span className="text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full text-[10px] font-bold">四等奖</span>;
-      case 5: return <span className="text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full text-[10px]">五等奖</span>;
-      case 6: return <span className="text-slate-500 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full text-[10px]">六等奖</span>;
-      default: return null;
-    }
+  // 简单的奖级文本
+  const getPrizeText = (level: PrizeLevel) => {
+    const map = ['', '一等奖', '二等奖', '三等奖', '四等奖', '五等奖', '六等奖'];
+    return map[level] || '';
   };
 
   return (
     <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-center overflow-hidden font-sans text-slate-900">
       
+      {/* 核心容器 */}
       <div className="w-full max-w-[1300px] h-full p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-6">
         
-        {/* === 左侧栏：官方历史 === */}
+        {/* === 左侧栏：官方历史 (纯净版) === */}
         <aside className="hidden lg:flex flex-col h-full overflow-hidden order-1">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
             <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
                <div className="flex items-center gap-2">
                  <Calendar className="w-4 h-4 text-blue-500" />
-                 <h3 className="text-slate-700 font-bold text-sm">官方开奖</h3>
+                 <h3 className="text-slate-700 font-bold text-sm">官方历史数据</h3>
                </div>
-               <span className="text-[10px] text-slate-400">数据源: 福彩中心</span>
             </div>
             
-            <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-              {/* 加载中状态 */}
-              {isLoadingData && (
-                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-xs bg-white/80 z-10">
-                   <Loader2 className="w-6 h-6 animate-spin mb-2 text-blue-500"/>
-                   正在同步官方数据...
-                 </div>
-              )}
-              
-              {/* 错误状态 (没有假数据了) */}
-              {isError && !isLoadingData && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-xs bg-white">
-                  <WifiOff className="w-8 h-8 mb-2 text-slate-300"/>
-                  <p>无法连接福彩官网</p>
-                  <p className="scale-75 opacity-70 mt-1">请检查网络或刷新</p>
+            <div className="flex-1 overflow-y-auto custom-scrollbar">
+              {isLoadingData ? (
+                 <div className="p-8 text-center text-slate-400 text-xs"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2"/>数据同步中...</div>
+              ) : drawsList.map((draw, idx) => (
+                <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                   <div className="flex justify-between items-center mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-700">第 {draw.issue} 期</span>
+                        <span className="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">{draw.week}</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400">{draw.date}</span>
+                   </div>
+                   <div className="flex gap-1 text-sm font-mono font-bold">
+                      {draw.red.map((n, i) => (
+                        <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>
+                      ))}
+                      <span className="text-blue-500">{draw.blue.toString().padStart(2, '0')}</span>
+                   </div>
                 </div>
-              )}
-
-              {drawsList.map((draw, idx) => {
-                const winner = winnersMap[draw.issue];
-                return (
-                  <div key={idx} 
-                    className={`p-3 transition-all duration-300 relative overflow-hidden
-                      ${winner 
-                        ? 'bg-gradient-to-r from-yellow-50 via-white to-white border-l-4 border-yellow-400 opacity-100' 
-                        : 'bg-white grayscale opacity-60 hover:opacity-100 hover:grayscale-0'
-                      }`}
-                  >
-                     {winner && (
-                       <div className="absolute top-0 right-0 z-10">
-                         <div className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-bl-lg font-bold shadow-sm flex items-center gap-1">
-                           <Trophy className="w-3 h-3 text-yellow-300" />
-                           {winner.user} 中{winner.prizeLevel === 1 ? '一等奖' : '二等奖'}
-                         </div>
-                       </div>
-                     )}
-
-                     <div className="flex justify-between items-center mb-1.5 mt-1">
-                        <span className={`text-xs font-bold ${winner ? 'text-slate-800' : 'text-slate-500'}`}>第 {draw.issue} 期</span>
-                        <span className="text-[10px] text-slate-300">{draw.date}</span>
-                     </div>
-                     <div className="flex gap-1 text-sm font-mono font-bold">
-                        {draw.red.map((n, i) => (
-                          <span key={i} className={winner ? 'text-red-500' : 'text-slate-400'}>{n.toString().padStart(2, '0')}</span>
-                        ))}
-                        <span className={winner ? 'text-blue-500' : 'text-slate-400'}>{draw.blue.toString().padStart(2, '0')}</span>
-                     </div>
-                  </div>
-                );
-              })}
+              ))}
             </div>
           </div>
         </aside>
 
-        {/* === 中间栏：主机 === */}
+        {/* === 中间栏：操作台 === */}
         <section className="flex flex-col h-full min-h-0 overflow-hidden order-2 relative">
           
           {/* Logo */}
@@ -326,19 +247,21 @@ export default function Home() {
              </div>
           </div>
 
-          {/* 信息看板 */}
+          {/* 信息仪表盘 */}
           <div className="shrink-0 w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-4 mb-4 text-white shadow-xl flex justify-between items-center relative overflow-hidden border border-slate-700">
              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
              
+             {/* 左：期号 */}
              <div className="z-10">
                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                 <RefreshCw className="w-3 h-3 animate-spin"/> 待开奖
+                 <RefreshCw className="w-3 h-3 animate-spin"/> 当前期号
                </div>
                <div className="text-2xl font-black tracking-tight text-white">
                  第 <span className="text-yellow-400">{nextIssueInfo.issue}</span> 期
                </div>
              </div>
 
+             {/* 中：时间 */}
              <div className="z-10 flex flex-col items-center justify-center">
                 <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-0.5">Current Time</div>
                 <div className="text-xl font-mono font-bold text-slate-200 tabular-nums tracking-widest flex items-center gap-2">
@@ -347,18 +270,19 @@ export default function Home() {
                 </div>
              </div>
 
+             {/* 右：截止 */}
              <div className="z-10 text-right">
                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-end gap-1">
-                 <Clock className="w-3 h-3"/> 截止
+                 <Clock className="w-3 h-3"/> 截止时间
                </div>
                <div className="text-base font-bold text-white flex items-center gap-1">
                  {nextIssueInfo.deadline}
-                 <AlertCircle className="w-4 h-4 text-red-400 animate-pulse" />
+                 <AlertCircle className="w-4 h-4 text-red-400" />
                </div>
              </div>
           </div>
 
-          {/* 机器主体 */}
+          {/* 选号机器 */}
           <div className="shrink-0 bg-white p-4 sm:p-6 rounded-[2rem] shadow-lg border-4 border-slate-100 w-full mb-4 relative overflow-hidden group">
             <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-red-100/50 to-orange-100/50 rounded-full -mr-20 -mt-20 z-0"></div>
             <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-blue-50 to-indigo-50 rounded-full -ml-16 -mb-16 z-0"></div>
@@ -381,15 +305,18 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 我的记录区 (防止溢出) */}
+          {/* 我的记录 (清爽版) */}
           <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
             <div className="bg-slate-50/50 px-5 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
                <div className="flex items-center gap-2">
-                 <UserCircle2 className="w-4 h-4 text-purple-500" />
-                 {/* 身份展示 */}
-                 <span className="text-slate-700 font-bold text-sm truncate max-w-[150px]">{username}</span>
+                 <History className="w-4 h-4 text-slate-500" />
+                 <span className="text-slate-700 font-bold text-sm">我的选号记录</span>
                </div>
-               {history.length > 0 && <button onClick={() => {setHistory([]); localStorage.removeItem('lottery-history')}} className="text-xs text-red-400 hover:text-red-600">清空</button>}
+               {history.length > 0 && (
+                 <button onClick={() => {setHistory([]); localStorage.removeItem('lottery-history')}} className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors">
+                   <Trash2 className="w-3 h-3"/> 清空
+                 </button>
+               )}
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -408,11 +335,11 @@ export default function Home() {
                       <span className="text-slate-200">|</span>
                       <span className="text-blue-500">{item.blue.toString().padStart(2, '0')}</span>
                     </div>
+                    {/* 仅保留参考信息，去掉夸张的图标 */}
                     {item.prizeLevel > 0 && (
                        <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                          <Sparkles className="w-3 h-3 text-yellow-500"/>
-                          <span>参考上期中</span>
-                          {getPrizeBadge(item.prizeLevel)}
+                          <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+                          <span>参考上期({item.winIssue}): {getPrizeText(item.prizeLevel)}</span>
                        </div>
                     )}
                   </div>
