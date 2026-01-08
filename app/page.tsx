@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Sparkles, Trophy, Loader2, Calendar, Clock, AlertCircle, Zap, Timer, UserCircle2 } from 'lucide-react';
+import { RefreshCw, Sparkles, Trophy, Loader2, Calendar, Clock, AlertCircle, Zap, Timer, UserCircle2, WifiOff } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 // --- 类型定义 ---
@@ -39,20 +39,22 @@ export default function Home() {
   const [redBalls, setRedBalls] = useState<number[]>([0,0,0,0,0,0]);
   const [blueBall, setBlueBall] = useState<number>(0);
   const [isRolling, setIsRolling] = useState(false);
+  
+  // 核心数据状态
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [drawsList, setDrawsList] = useState<DrawData[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
+  const [isError, setIsError] = useState(false); // 新增：错误状态
+
   const [winnersMap, setWinnersMap] = useState<Record<string, LinkedWinner>>({});
   const [nextIssueInfo, setNextIssueInfo] = useState({ issue: '---', deadline: '---' });
   const [currentTime, setCurrentTime] = useState<string>('');
-  
-  // 新增：当前用户身份
   const [username, setUsername] = useState<string>('加载中...');
 
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // 1. 初始化用户身份 (带缓存)
+    // 1. 用户身份
     let storedName = localStorage.getItem('lottery-username');
     if (!storedName) {
       const randomName = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
@@ -62,7 +64,7 @@ export default function Home() {
     }
     setUsername(storedName);
 
-    // 2. 启动时钟
+    // 2. 时钟
     const updateTime = () => {
       const now = new Date();
       setCurrentTime(now.toLocaleTimeString('zh-CN', { hour12: false }));
@@ -70,21 +72,29 @@ export default function Home() {
     updateTime();
     const timer = setInterval(updateTime, 1000);
 
-    // 3. 加载历史
+    // 3. 加载本地历史
     const saved = localStorage.getItem('lottery-history');
     if (saved) setHistory(JSON.parse(saved));
 
-    // 4. API 请求
+    // 4. 获取真实数据
     fetch('/api/lottery')
-      .then(res => res.json())
       .then(res => {
-        if (res.data && Array.isArray(res.data)) {
+        if (!res.ok) throw new Error('Network response was not ok');
+        return res.json();
+      })
+      .then(res => {
+        if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {
           setDrawsList(res.data);
           generateFakeWinners(res.data);
-          calculateNextIssue(res.data[0]);
+          calculateNextIssueReal(res.data[0]); // 使用严谨计算
+        } else {
+          throw new Error('Data format error or empty');
         }
       })
-      .catch(err => console.error('API Error:', err))
+      .catch(err => {
+        console.error('API Error:', err);
+        setIsError(true); // 标记错误，不再显示假数据
+      })
       .finally(() => setIsLoadingData(false));
 
     return () => clearInterval(timer);
@@ -94,29 +104,50 @@ export default function Home() {
     if (history.length > 0) localStorage.setItem('lottery-history', JSON.stringify(history));
   }, [history]);
 
-  const calculateNextIssue = (latestDraw: DrawData) => {
+  // --- 严谨的下一期计算逻辑 ---
+  // 双色球开奖时间：周二、四、日 21:15
+  // 销售截止时间：当天 20:00
+  const calculateNextIssueReal = (latestDraw: DrawData) => {
     if (!latestDraw) return;
+    
+    // 1. 推算期号 (简单+1，处理跨年需更复杂逻辑，此处暂用+1)
+    // 真实场景通常需要后端给nextIssue，如果没有，我们只能基于最新期号+1
     const currentIssueNum = parseInt(latestDraw.issue);
     const nextIssue = (currentIssueNum + 1).toString();
-    const today = new Date();
-    const dayOfWeek = today.getDay();
-    const hour = today.getHours();
+
+    // 2. 推算截止时间
+    const now = new Date();
+    const currentDay = now.getDay(); // 0-6 (Sun-Sat)
+    const currentHour = now.getHours();
+
+    // 定义开奖日：周二(2)、周四(4)、周日(0)
+    // 如果今天是开奖日，且还没到20:00，那下一期就是【今天】
+    let daysToAdd = 0;
+    const isDrawDay = [0, 2, 4].includes(currentDay);
     
-    let daysUntilNextDraw = 0;
-    if ((dayOfWeek === 2 || dayOfWeek === 4 || dayOfWeek === 0) && hour < 20) {
-      daysUntilNextDraw = 0;
+    if (isDrawDay && currentHour < 20) {
+      daysToAdd = 0; // 就是今天
     } else {
-      if (dayOfWeek === 2) daysUntilNextDraw = 2;
-      else if (dayOfWeek === 4) daysUntilNextDraw = 3;
-      else if (dayOfWeek === 0) daysUntilNextDraw = 2;
-      else if (dayOfWeek === 1) daysUntilNextDraw = 1;
-      else if (dayOfWeek === 3) daysUntilNextDraw = 1;
-      else if (dayOfWeek === 5) daysUntilNextDraw = 2;
-      else if (dayOfWeek === 6) daysUntilNextDraw = 1;
+      // 找下一个开奖日
+      // Sun(0) -> Tue(2) (+2)
+      // Mon(1) -> Tue(2) (+1)
+      // Tue(2) -> Thu(4) (+2)
+      // Wed(3) -> Thu(4) (+1)
+      // Thu(4) -> Sun(0) (+3)
+      // Fri(5) -> Sun(0) (+2)
+      // Sat(6) -> Sun(0) (+1)
+      if (currentDay === 0) daysToAdd = 2;
+      else if (currentDay === 1) daysToAdd = 1;
+      else if (currentDay === 2) daysToAdd = 2;
+      else if (currentDay === 3) daysToAdd = 1;
+      else if (currentDay === 4) daysToAdd = 3;
+      else if (currentDay === 5) daysToAdd = 2;
+      else if (currentDay === 6) daysToAdd = 1;
     }
 
-    const nextDate = new Date(today);
-    nextDate.setDate(today.getDate() + daysUntilNextDraw);
+    const nextDate = new Date();
+    nextDate.setDate(now.getDate() + daysToAdd);
+    
     const weekMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const deadlineStr = `${weekMap[nextDate.getDay()]} 20:00`;
 
@@ -125,10 +156,11 @@ export default function Home() {
 
   const generateFakeWinners = (draws: DrawData[]) => {
     const map: Record<string, LinkedWinner> = {};
+    // 仅基于真实数据生成趣味喜报
     const assignWinner = (idx: number, level: 1 | 2) => {
        if (idx < draws.length) {
          const randomName = FUN_NAMES[Math.floor(Math.random() * FUN_NAMES.length)];
-         const suffix = Math.floor(Math.random() * 99) + 1; 
+         const suffix = Math.floor(Math.random() * 999) + 1; 
          map[draws[idx].issue] = { user: `${randomName} No.${suffix}`, prizeLevel: level };
        }
     };
@@ -209,13 +241,11 @@ export default function Home() {
   };
 
   return (
-    // 改动1: fixed inset-0 彻底锁死视口，w-full 防止水平溢出
     <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-center overflow-hidden font-sans text-slate-900">
       
-      {/* 核心 Grid: h-full 占满高度 */}
       <div className="w-full max-w-[1300px] h-full p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-6">
         
-        {/* === 左侧栏 === */}
+        {/* === 左侧栏：官方历史 === */}
         <aside className="hidden lg:flex flex-col h-full overflow-hidden order-1">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
             <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
@@ -223,14 +253,28 @@ export default function Home() {
                  <Calendar className="w-4 h-4 text-blue-500" />
                  <h3 className="text-slate-700 font-bold text-sm">官方开奖</h3>
                </div>
-               <span className="text-[10px] text-slate-400">福彩源数据</span>
+               <span className="text-[10px] text-slate-400">数据源: 福彩中心</span>
             </div>
             
-            {/* 列表自适应滚动 */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {isLoadingData ? (
-                 <div className="p-8 text-center text-slate-400 text-xs"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2"/>加载中...</div>
-              ) : drawsList.map((draw, idx) => {
+            <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+              {/* 加载中状态 */}
+              {isLoadingData && (
+                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-xs bg-white/80 z-10">
+                   <Loader2 className="w-6 h-6 animate-spin mb-2 text-blue-500"/>
+                   正在同步官方数据...
+                 </div>
+              )}
+              
+              {/* 错误状态 (没有假数据了) */}
+              {isError && !isLoadingData && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 text-xs bg-white">
+                  <WifiOff className="w-8 h-8 mb-2 text-slate-300"/>
+                  <p>无法连接福彩官网</p>
+                  <p className="scale-75 opacity-70 mt-1">请检查网络或刷新</p>
+                </div>
+              )}
+
+              {drawsList.map((draw, idx) => {
                 const winner = winnersMap[draw.issue];
                 return (
                   <div key={idx} 
@@ -266,8 +310,7 @@ export default function Home() {
           </div>
         </aside>
 
-        {/* === 中间栏 === */}
-        {/* 改动2: min-h-0 是防止 Flex 容器被子元素撑爆的关键 */}
+        {/* === 中间栏：主机 === */}
         <section className="flex flex-col h-full min-h-0 overflow-hidden order-2 relative">
           
           {/* Logo */}
@@ -287,7 +330,6 @@ export default function Home() {
           <div className="shrink-0 w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-4 mb-4 text-white shadow-xl flex justify-between items-center relative overflow-hidden border border-slate-700">
              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
              
-             {/* 左：期号 */}
              <div className="z-10">
                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
                  <RefreshCw className="w-3 h-3 animate-spin"/> 待开奖
@@ -297,7 +339,6 @@ export default function Home() {
                </div>
              </div>
 
-             {/* 中：实时时间 */}
              <div className="z-10 flex flex-col items-center justify-center">
                 <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-0.5">Current Time</div>
                 <div className="text-xl font-mono font-bold text-slate-200 tabular-nums tracking-widest flex items-center gap-2">
@@ -306,7 +347,6 @@ export default function Home() {
                 </div>
              </div>
 
-             {/* 右：截止时间 */}
              <div className="z-10 text-right">
                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-end gap-1">
                  <Clock className="w-3 h-3"/> 截止
@@ -341,12 +381,12 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 我的记录区 */}
-          {/* flex-1 + min-h-0 + flex-col 实现列表区域自适应填满剩余空间且内部滚动 */}
+          {/* 我的记录区 (防止溢出) */}
           <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
             <div className="bg-slate-50/50 px-5 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
                <div className="flex items-center gap-2">
                  <UserCircle2 className="w-4 h-4 text-purple-500" />
+                 {/* 身份展示 */}
                  <span className="text-slate-700 font-bold text-sm truncate max-w-[150px]">{username}</span>
                </div>
                {history.length > 0 && <button onClick={() => {setHistory([]); localStorage.removeItem('lottery-history')}} className="text-xs text-red-400 hover:text-red-600">清空</button>}

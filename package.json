@@ -12,6 +12,8 @@
     "@ducanh2912/next-pwa": "^10.2.9",
     "@next/third-parties": "^16.1.1",
     "canvas-confetti": "^1.9.4",
+    "cheerio": "^1.1.2",
+    "iconv-lite": "^0.7.1",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
     "react": "19.2.3",
