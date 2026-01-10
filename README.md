@@ -2,7 +2,7 @@
 
 > **"把命运交给运气，而不是彩票站的机选。"**
 
-[![Vercel](https://vercelbadge.vercel.app/api/your-github-username/your-repo-name)](https://bonus.nextbday.com)
+[![Vercel](https://vercelbadge.vercel.app/api/biglazyman/lottery-lucky-gen)](https://bonus.nextbday.com)
 
 ## 🤔 这是什么？
 
