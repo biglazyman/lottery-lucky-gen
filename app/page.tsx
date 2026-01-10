@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Sparkles, Loader2, Calendar, Clock, Zap, History, Trash2, Globe, ChevronDown, List, X, CalendarDays, Award } from 'lucide-react';
+import { RefreshCw, Sparkles, Loader2, Calendar, Clock, Zap, History, Trash2, Globe, ChevronDown, List, X, CalendarDays, Award, AlertCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 // --- 1. 基础配置 ---
@@ -32,18 +32,6 @@ const LOTTERY_TYPES: Record<string, LotteryRule> = {
     mainColor: 'bg-orange-500', subColor: 'bg-indigo-500', hasSub: true,
     drawDays: [1, 3, 6]
   },
-  powerball: {
-    id: 'powerball', nameKey: 'lottery_powerball',
-    redCount: 5, redMax: 69, blueCount: 1, blueMax: 26,
-    mainColor: 'bg-slate-700', subColor: 'bg-red-600', hasSub: true,
-    drawDays: [1, 3, 6]
-  },
-  pure: {
-    id: 'pure', nameKey: 'lottery_pure',
-    redCount: 6, redMax: 45, blueCount: 0, blueMax: 0,
-    mainColor: 'bg-emerald-500', subColor: '', hasSub: false,
-    drawDays: []
-  }
 };
 
 const DICTIONARY = {
@@ -60,8 +48,6 @@ const DICTIONARY = {
     empty_history: '暂无记录',
     lottery_ssq: '双色球',
     lottery_dlt: '大乐透',
-    lottery_powerball: 'Powerball',
-    lottery_pure: '纯享版',
     tip_sync: '数据同步中...',
     tip_no_data: '无历史比对',
     week_names: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
@@ -83,8 +69,6 @@ const DICTIONARY = {
     empty_history: 'No records',
     lottery_ssq: 'Union Lotto',
     lottery_dlt: 'Super Lotto',
-    lottery_powerball: 'Powerball',
-    lottery_pure: 'Classic',
     tip_sync: 'Syncing...',
     tip_no_data: 'No Data',
     week_names: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
