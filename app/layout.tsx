@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { GoogleAnalytics } from '@next/third-parties/google'
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -50,6 +51,8 @@ export default function RootLayout({
       </body>
 
       <GoogleAnalytics gaId="G-W2B5JCC7SN" />
+
+      <SpeedInsights/>
     </html>
   );
 }
