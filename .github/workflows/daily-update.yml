@@ -27,13 +27,10 @@ jobs:
         with:
           node-version: '18'
 
-      # 3. 运行更新脚本 (双色球)
-      - name: Run SSQ update script
+      # 3. 运行更新脚本 (双色球/大乐透)
+      - name: Run update script
         run: node scripts/update.js
 
-      # 4. 运行更新脚本 (大乐透) - 新增这一步
-      - name: Run DLT update script
-        run: node scripts/update_dlt.js
 
       # 5. 检查是否有变动并提交
       - name: Commit and push if changes
