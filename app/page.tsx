@@ -4,7 +4,34 @@ import { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Sparkles, Loader2, Calendar, Clock, Zap, History, Trash2, Globe, ChevronDown, List, X, CalendarDays, Award, AlertCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-// --- 1. 基础配置 (保持不变) ---
+// --- 1. 提取广告组件 (解决 availableWidth=0 问题的关键) ---
+// 这个组件只有在被渲染到屏幕上时，才会触发 AdSense 的 push
+const AdBanner = ({ slotId, className }: { slotId: string, className?: string }) => {
+  useEffect(() => {
+    try {
+      // 只有当组件挂载后才推送请求，确保 DOM 存在且有宽度
+      if (typeof window !== 'undefined') {
+        (window.adsbygoogle = window.adsbygoogle || []).push({});
+      }
+    } catch (e) {
+      // 忽略重复推送或被拦截的错误
+      console.log('AdSense push error ignored:', e);
+    }
+  }, []); // 空依赖数组，确保只在挂载时执行一次
+
+  return (
+    <div className={className}>
+      <ins className="adsbygoogle"
+           style={{ display: 'block', width: '100%', height: '100%' }}
+           data-ad-client="ca-pub-8008172334018039"
+           data-ad-slot={slotId}
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+    </div>
+  );
+};
+
+// --- 2. 基础配置 ---
 
 type LotteryRule = {
   id: string;
@@ -32,7 +59,7 @@ const LOTTERY_TYPES: Record<string, LotteryRule> = {
     mainColor: 'bg-orange-500', subColor: 'bg-indigo-500', hasSub: true,
     drawDays: [1, 3, 6]
   },
-  // ... 其他类型省略，保持原样 ...
+  // ... 其他类型保持原样，这里为了节省篇幅省略，逻辑不变 ...
 };
 
 const DICTIONARY = {
@@ -89,6 +116,11 @@ declare global {
 }
 
 export default function Home() {
+  // 解决 Hydration 问题，确保只在客户端渲染广告
+  const [mounted, setMounted] = useState(false);
+  // 新增：判断是否为桌面端，用于条件渲染广告
+  const [isDesktop, setIsDesktop] = useState(false);
+
   const [lang, setLang] = useState<Lang>('zh');
   const [currentType, setCurrentType] = useState<string>('ssq');
   
@@ -104,14 +136,21 @@ export default function Home() {
   const [deadlineStr, setDeadlineStr] = useState<string>('---');
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [year, setYear] = useState('');
-  const [isInitialized, setIsInitialized] = useState(false);
   
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const t = DICTIONARY[lang];
   const rule = LOTTERY_TYPES[currentType] || LOTTERY_TYPES['ssq'];
 
+  // --- 初始化逻辑 ---
   useEffect(() => {
+    setMounted(true);
     setYear(new Date().getFullYear().toString());
+    
+    // 初始化屏幕宽度检测
+    const checkIsDesktop = () => setIsDesktop(window.innerWidth >= 1024);
+    checkIsDesktop();
+    window.addEventListener('resize', checkIsDesktop);
+
     const savedHistory = localStorage.getItem('lottery-history-v2');
     if (savedHistory) setMyHistory(JSON.parse(savedHistory));
 
@@ -119,11 +158,12 @@ export default function Home() {
     if (savedType && LOTTERY_TYPES[savedType]) {
         setCurrentType(savedType);
     }
-    setIsInitialized(true);
+
+    return () => window.removeEventListener('resize', checkIsDesktop);
   }, []);
 
   useEffect(() => {
-    if (!isInitialized) return;
+    if (!mounted) return;
     resetBalls(currentType);
     updateTimeInfo();
     fetchOfficialData(currentType);
@@ -131,27 +171,13 @@ export default function Home() {
 
     const timer = setInterval(updateTimeInfo, 1000 * 60);
     return () => clearInterval(timer);
-  }, [lang, currentType, isInitialized]);
-
-  // --- 🔥 改动 1：广告初始化逻辑优化 ---
-  useEffect(() => {
-    try {
-      // 我们移除了 window.innerWidth >= 1024 的判断。
-      // 现在，无论手机还是电脑，只要页面上有 adsbygoogle 的插槽，就尝试加载广告。
-      // 因为我们在 JSX 里通过 lg:hidden 等类名控制了插槽的显示，所以不会冲突。
-      if (typeof window !== 'undefined') {
-         (window.adsbygoogle = window.adsbygoogle || []).push({});
-      }
-    } catch (e) {
-      console.error('AdSense error:', e);
-    }
-  }, []); 
+  }, [lang, currentType, mounted]);
 
   useEffect(() => {
-    if (myHistory.length > 0) localStorage.setItem('lottery-history-v2', JSON.stringify(myHistory));
-  }, [myHistory]);
+    if (mounted && myHistory.length > 0) localStorage.setItem('lottery-history-v2', JSON.stringify(myHistory));
+  }, [myHistory, mounted]);
 
-  // --- 数据拉取和其他辅助函数 (保持不变) ---
+  // --- 数据获取与业务逻辑 (保持不变) ---
   const fetchOfficialData = async (type: string) => {
     if (type !== 'ssq' && type !== 'dlt') {
        setOfficialDraws([]); return;
@@ -207,7 +233,7 @@ export default function Home() {
       setMainBalls(finalMains); setSubBalls(finalSubs); setIsRolling(false); triggerConfetti();
       let targetIssue = '---'; if (officialDraws.length > 0) targetIssue = (parseInt(officialDraws[0].issue) + 1).toString();
       const newRecord: HistoryItem = { issue: targetIssue, red: finalMains, blue: finalSubs, date: new Date().toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', {hour: '2-digit', minute:'2-digit'}), type: currentType };
-      setMyHistory(prev => [newRecord, ...prev].slice(50));
+      setMyHistory(prev => [newRecord, ...prev].slice(0, 50));
     }, 800);
   };
 
@@ -264,6 +290,11 @@ export default function Home() {
     ));
   };
 
+  // 尚未挂载时不渲染任何内容，防止 SSR 不匹配
+  if (!mounted) {
+    return <div className="fixed inset-0 bg-slate-50 flex items-center justify-center"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>;
+  }
+
   return (
     <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-start sm:justify-center overflow-hidden font-sans text-slate-900">
       
@@ -303,6 +334,7 @@ export default function Home() {
         <section className="flex flex-col h-full min-h-0 overflow-hidden order-2 relative">
           {/* Top Info Card */}
           <div className="shrink-0 w-full bg-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 text-white shadow-lg flex justify-between items-center relative overflow-hidden">
+             {/* ... 保持原样 ... */}
              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
              <div className="z-10 flex-1 min-w-0">
                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><RefreshCw className="w-3 h-3"/> {t.wait_draw}</div>
@@ -320,6 +352,7 @@ export default function Home() {
 
           {/* Rolling Section */}
           <div className="shrink-0 bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[1.5rem] shadow-sm border border-slate-200 w-full mb-3 sm:mb-4 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] sm:min-h-[200px]">
+             {/* ... 保持原样 ... */}
              <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 max-w-full">
                 {mainBalls.map((num, idx) => ( <div key={`m-${idx}`} className={`w-10 h-10 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-2xl font-black shadow-inner transition-all duration-100 text-white ${rule.mainColor} ${isRolling ? 'scale-105 blur-[0.5px]' : ''}`}>{num === 0 ? '?' : num.toString().padStart(2, '0')}</div> ))}
                 {subBalls.map((num, idx) => ( <div key={`s-${idx}`} className={`w-10 h-10 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-2xl font-black shadow-inner transition-all duration-100 text-white ${rule.subColor} ${isRolling ? 'scale-105 blur-[0.5px]' : ''}`}>{num === 0 ? '?' : num.toString().padStart(2, '0')}</div> ))}
@@ -332,8 +365,8 @@ export default function Home() {
           </div>
 
           {/* My History Section */}
-          {/* 🔥 改动 2：修改容器样式。手机端固定高度 (h-[300px])，桌面端自适应充满 (lg:h-auto lg:flex-1) */}
           <div className="h-[300px] lg:h-auto lg:flex-1 min-h-0 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden mb-3 lg:mb-0">
+             {/* ... 保持原样 ... */}
             <div className="bg-slate-50/50 px-4 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
                <div className="flex items-center gap-2"><History className="w-4 h-4 text-slate-500" /><span className="text-slate-700 font-bold text-sm">{t.history_title}</span></div>
                {myHistory.length > 0 && <button onClick={() => {setMyHistory([]); localStorage.removeItem('lottery-history-v2')}} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"><Trash2 className="w-3 h-3"/> {t.clear}</button>}
@@ -344,30 +377,27 @@ export default function Home() {
             </div>
           </div>
 
-          {/* 🔥 改动 3：新增手机端底部广告位 (仅在手机端显示 lg:hidden) */}
-          <div className="lg:hidden shrink-0 w-full h-[100px] bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
-              {/* 🔴 请替换 YYYYYYYYYY 为你新申请的“手机底部横幅”广告的 slot ID */}
-              <ins className="adsbygoogle"
-                   style={{ display: 'block', width: '100%', height: '100%' }}
-                   data-ad-client="ca-pub-8008172334018039" 
-                   data-ad-slot="5923211171"
-                   data-ad-format="auto"
-                   data-full-width-responsive="true"></ins>
-          </div>
+          {/* 🔥 关键修复：只有在 !isDesktop (即手机端) 时，才渲染这个广告组件 */}
+          {/* 这样 AdSense 就不会扫描到一个 width=0 的元素了 */}
+          {!isDesktop && (
+            <AdBanner 
+              slotId="5923211171" 
+              className="shrink-0 w-full h-[100px] bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center" 
+            />
+          )}
 
         </section>
         
         {/* Right: Ad Space (Desktop only) */}
-        <aside className="hidden lg:flex flex-col h-full order-3 overflow-hidden">
-          <div className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs">
-              <ins className="adsbygoogle"
-                   style={{ display: 'block', width: '100%', height: '100%' }}
-                   data-ad-client="ca-pub-8008172334018039" 
-                   data-ad-slot="2175537857"
-                   data-ad-format="auto"
-                   data-full-width-responsive="true"></ins>
-          </div>
-        </aside>
+        {/* 🔥 关键修复：只有在 isDesktop (即电脑端) 时，才渲染这个广告组件 */}
+        {isDesktop && (
+          <aside className="flex flex-col h-full order-3 overflow-hidden">
+            <AdBanner 
+              slotId="2175537857" 
+              className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs" 
+            />
+          </aside>
+        )}
       </div>
 
       {/* Mobile History Modal (保持不变) */}

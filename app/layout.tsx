@@ -6,8 +6,8 @@ import { GoogleAnalytics } from '@next/third-parties/google'
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "欧气选号机 - 免费在线双色球随机选号工具",
-  description: "一款基于加密级真随机算法的双色球选号工具...",
+  title: '欧气选号机 - Lucky Lotto Generator',
+  description: "基于真随机算法的双色球、大乐透选号工具...",
   manifest: "/manifest.json", // 显式链接 manifest
   themeColor: "#0f172a",      // 顶部状态栏颜色
   // iOS 专用配置
@@ -22,6 +22,11 @@ export const metadata: Metadata = {
     initialScale: 1,
     maximumScale: 1,
     userScalable: false, 
+  },
+  icons: {
+    icon: '/icon.png',
+    shortcut: '/icon.png',
+    apple: '/icon.png',
   },
 };
 export default function RootLayout({
