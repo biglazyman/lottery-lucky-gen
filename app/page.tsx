@@ -32,8 +32,10 @@ const LOTTERY_TYPES: Record<string, LotteryRule> = {
     mainColor: 'bg-orange-500', subColor: 'bg-indigo-500', hasSub: true,
     drawDays: [1, 3, 6]
   },
+  // ... 其他彩种保留 ...
 };
 
+// ... DICTIONARY (字典) 保持不变 ...
 const DICTIONARY = {
   zh: {
     title: '欧气选号机',
@@ -54,7 +56,6 @@ const DICTIONARY = {
     today: '今天',
     draw_issue: '第{n}期',
     win_prize: '中{n}',
-    wait_result: '待开奖'
   },
   en: {
     title: 'Lucky Lotto',
@@ -75,7 +76,6 @@ const DICTIONARY = {
     today: 'Today',
     draw_issue: '#{n}',
     win_prize: 'Won {n}',
-    wait_result: 'Waiting'
   }
 };
 
@@ -83,8 +83,15 @@ type Lang = 'zh' | 'en';
 type DrawData = { issue: string; date: string; week: string; red: number[]; blue: number[]; };
 type HistoryItem = { issue: string; red: number[]; blue: number[]; date: string; type: string };
 
+declare global {
+  interface Window {
+    adsbygoogle: any[];
+  }
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>('zh');
+  // 默认 ssq，但在 useEffect 中会立即纠正
   const [currentType, setCurrentType] = useState<string>('ssq');
   
   const [mainBalls, setMainBalls] = useState<number[]>([]);
@@ -93,7 +100,6 @@ export default function Home() {
   
   const [myHistory, setMyHistory] = useState<HistoryItem[]>([]);
   const [officialDraws, setOfficialDraws] = useState<DrawData[]>([]);
-  // --- 新增: 明确的加载状态 ---
   const [isDataLoading, setIsDataLoading] = useState(false);
   
   const [currentWeekday, setCurrentWeekday] = useState<string>('');
@@ -101,55 +107,82 @@ export default function Home() {
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [year, setYear] = useState('');
   
+  // 标记是否已经完成了初始化（避免重复 fetch）
+  const [isInitialized, setIsInitialized] = useState(false);
+  
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const t = DICTIONARY[lang];
   const rule = LOTTERY_TYPES[currentType] || LOTTERY_TYPES['ssq'];
 
+  // --- 1. 初始化逻辑 (仅执行一次) ---
   useEffect(() => {
     setYear(new Date().getFullYear().toString());
+    
+    // 读取历史记录
     const savedHistory = localStorage.getItem('lottery-history-v2');
     if (savedHistory) setMyHistory(JSON.parse(savedHistory));
 
+    // 读取用户习惯
     const savedType = localStorage.getItem('user-lottery-type');
     if (savedType && LOTTERY_TYPES[savedType]) {
+        // 如果有缓存，更新状态。
+        // 注意：React 状态更新是异步的，所以这里更新后，
+        // 下面的 [currentType] useEffect 会检测到变化并自动触发 fetch
         setCurrentType(savedType);
     }
+    
+    // 标记初始化完成，允许开始 fetch
+    setIsInitialized(true);
   }, []);
 
+  // --- 2. 核心监听逻辑 (Type 变化时触发) ---
   useEffect(() => {
+    // 只有当初始化完成后，才执行这些逻辑
+    if (!isInitialized) return;
+
+    // A. 重置球盘
     resetBalls(currentType);
+    
+    // B. 更新时间
     updateTimeInfo();
     
-    // 每次切换类型，触发拉取
+    // C. 拉取数据 (这里是关键修复：每次 type 变了，或者初始化完成了，都强制拉取)
     fetchOfficialData(currentType);
 
+    // D. 保存习惯
     localStorage.setItem('user-lottery-type', currentType);
 
     const timer = setInterval(updateTimeInfo, 1000 * 60);
     return () => clearInterval(timer);
-  }, [lang, currentType]);
+  }, [lang, currentType, isInitialized]); // 加入 isInitialized 依赖
+
+  // --- 3. 广告初始化 ---
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+         (window.adsbygoogle = window.adsbygoogle || []).push({});
+      }
+    } catch (e) {}
+  }, []);
 
   useEffect(() => {
     if (myHistory.length > 0) localStorage.setItem('lottery-history-v2', JSON.stringify(myHistory));
   }, [myHistory]);
 
-  // --- 修复后的数据拉取逻辑 ---
+  // --- 数据拉取函数 ---
   const fetchOfficialData = async (type: string) => {
-    // 1. 如果是不支持 API 的彩种，直接清空并停止
     if (type !== 'ssq' && type !== 'dlt') {
        setOfficialDraws([]);
        return;
     }
-
-    // 2. 开始加载：设置 loading 为 true
+    
+    // 立即清空旧数据，并显示 Loading
+    setOfficialDraws([]); 
     setIsDataLoading(true);
-    setOfficialDraws([]); // 清空旧数据，防止混淆
 
     try {
-      // 加个时间戳防缓存
       const res = await fetch(`/api/lottery?type=${type}&t=${new Date().getTime()}`);
       const json = await res.json();
-      
       if (json.success && Array.isArray(json.data)) {
         setOfficialDraws(json.data);
       } else {
@@ -159,7 +192,6 @@ export default function Home() {
       console.error('Fetch error:', err);
       setOfficialDraws([]);
     } finally {
-      // 3. 无论成功失败，都必须结束 loading 状态
       setIsDataLoading(false);
     }
   };
@@ -293,7 +325,12 @@ export default function Home() {
 
   const renderHistoryItem = (item: HistoryItem, idx: number) => {
     const itemRule = LOTTERY_TYPES[item.type] || LOTTERY_TYPES['ssq'];
-    const officialData = officialDraws.find(d => d.issue === item.issue);
+    
+    let officialData = undefined;
+    if (item.type === currentType) {
+        officialData = officialDraws.find(d => d.issue === item.issue);
+    }
+    
     const result = checkWin(item.red, item.blue, officialData, item.type);
 
     return (
@@ -340,24 +377,16 @@ export default function Home() {
     );
   };
 
-  // --- 复用官方列表渲染 ---
   const renderOfficialList = () => {
-    // 1. 如果不是 SSQ 或 DLT，显示“无数据”
     if (currentType !== 'ssq' && currentType !== 'dlt') {
         return <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>;
     }
-
-    // 2. 如果正在加载，显示转圈
     if (isDataLoading) {
         return <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>;
     }
-
-    // 3. 如果加载完了但没数据，显示“暂无数据” (而不是一直转圈)
     if (officialDraws.length === 0) {
         return <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>;
     }
-
-    // 4. 有数据，显示列表
     return officialDraws.map((draw, idx) => (
         <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
             <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
@@ -453,9 +482,16 @@ export default function Home() {
             </div>
           </div>
         </section>
-
+        
         <aside className="hidden lg:flex flex-col h-full order-3 overflow-hidden">
-          <div className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs">AD SPACE</div>
+          <div className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs">
+              <ins className="adsbygoogle"
+                   style={{ display: 'block', width: '100%', height: '100%' }}
+                   data-ad-client="ca-pub-XXXXXXXXXXXXXXXX" 
+                   data-ad-slot="XXXXXXXXXX"
+                   data-ad-format="auto"
+                   data-full-width-responsive="true"></ins>
+          </div>
         </aside>
       </div>
 
