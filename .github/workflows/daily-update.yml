@@ -6,7 +6,7 @@ name: Daily Lottery Update
 on:
   schedule:
     # 分 时 日 月 周 (UTC时间)
-    # 双色球周二、四、日开奖，大约21:15开出。我们设为每天跑，确保不漏。
+    # 覆盖双色球(二四日)和大乐透(一三六)的开奖时间，每天跑最稳妥
     - cron: '30 14 * * *' 
   workflow_dispatch:
 
@@ -27,20 +27,24 @@ jobs:
         with:
           node-version: '18'
 
-      # 3. 运行你的更新脚本
-      - name: Run update script
+      # 3. 运行更新脚本 (双色球)
+      - name: Run SSQ update script
         run: node scripts/update.js
 
-      # 4. 检查是否有变动并提交
+      # 4. 运行更新脚本 (大乐透) - 新增这一步
+      - name: Run DLT update script
+        run: node scripts/update_dlt.js
+
+      # 5. 检查是否有变动并提交
       - name: Commit and push if changes
         run: |
           git config --global user.name 'GitHub Action Bot'
           git config --global user.email 'action@github.com'
           
-          # 检查 data/lottery.json 是否有变化
-          if [[ -n $(git status --porcelain data/lottery.json) ]]; then
+          # 检查 data/ 目录下任何 json 文件是否有变化
+          if [[ -n $(git status --porcelain data/) ]]; then
             echo "⚡ 发现数据更新，正在提交..."
-            git add data/lottery.json
+            git add data/*.json
             git commit -m "chore(data): auto update lottery results [skip ci]"
             git push
           else

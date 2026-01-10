@@ -1,363 +1,491 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { RefreshCw, Sparkles, Loader2, Calendar, Clock, AlertCircle, Zap, Timer, History, Trash2 } from 'lucide-react';
+import { RefreshCw, Sparkles, Loader2, Calendar, Clock, Zap, History, Trash2, Globe, ChevronDown, List, X, CalendarDays, Award } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-// --- 类型定义 ---
-type DrawData = {
-  issue: string;
-  date: string;
-  week: string;
-  red: number[];
-  blue: number;
+// --- 1. 基础配置 ---
+
+type LotteryRule = {
+  id: string;
+  nameKey: string; 
+  redCount: number;
+  redMax: number;
+  blueCount: number;
+  blueMax: number;
+  mainColor: string;
+  subColor: string;
+  hasSub: boolean;
+  drawDays: number[];
 };
 
-// 奖级: 1=一等奖 ... 6=六等奖
-type PrizeLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-
-type HistoryItem = {
-  red: number[];
-  blue: number;
-  date: string;
-  prizeLevel: PrizeLevel; // 仅作为参考：该号码如果买上一期能中多少
-  winIssue?: string;
-  forIssue: string; // 该号码是为哪一期生成的
+const LOTTERY_TYPES: Record<string, LotteryRule> = {
+  ssq: {
+    id: 'ssq', nameKey: 'lottery_ssq',
+    redCount: 6, redMax: 33, blueCount: 1, blueMax: 16,
+    mainColor: 'bg-red-500', subColor: 'bg-blue-500', hasSub: true,
+    drawDays: [0, 2, 4]
+  },
+  dlt: {
+    id: 'dlt', nameKey: 'lottery_dlt',
+    redCount: 5, redMax: 35, blueCount: 2, blueMax: 12,
+    mainColor: 'bg-orange-500', subColor: 'bg-indigo-500', hasSub: true,
+    drawDays: [1, 3, 6]
+  },
+  powerball: {
+    id: 'powerball', nameKey: 'lottery_powerball',
+    redCount: 5, redMax: 69, blueCount: 1, blueMax: 26,
+    mainColor: 'bg-slate-700', subColor: 'bg-red-600', hasSub: true,
+    drawDays: [1, 3, 6]
+  },
+  pure: {
+    id: 'pure', nameKey: 'lottery_pure',
+    redCount: 6, redMax: 45, blueCount: 0, blueMax: 0,
+    mainColor: 'bg-emerald-500', subColor: '', hasSub: false,
+    drawDays: []
+  }
 };
+
+const DICTIONARY = {
+  zh: {
+    title: '欧气选号机',
+    action_roll: '注入欧气',
+    action_rolling: '祈祷中...',
+    history_title: '我的记录',
+    official_title: '官方历史',
+    clear: '清空',
+    wait_draw: '下期',
+    deadline: '截止',
+    weekday_title: '今天是',
+    empty_history: '暂无记录',
+    lottery_ssq: '双色球',
+    lottery_dlt: '大乐透',
+    lottery_powerball: 'Powerball',
+    lottery_pure: '纯享版',
+    tip_sync: '数据同步中...',
+    tip_no_data: '无历史比对',
+    week_names: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
+    today: '今天',
+    draw_issue: '第{n}期',
+    win_prize: '中{n}',
+    wait_result: '待开奖'
+  },
+  en: {
+    title: 'Lucky Lotto',
+    action_roll: 'Roll',
+    action_rolling: 'Praying...',
+    history_title: 'My Picks',
+    official_title: 'History',
+    clear: 'Clear',
+    wait_draw: 'Next',
+    deadline: 'Deadline',
+    weekday_title: 'Today is',
+    empty_history: 'No records',
+    lottery_ssq: 'Union Lotto',
+    lottery_dlt: 'Super Lotto',
+    lottery_powerball: 'Powerball',
+    lottery_pure: 'Classic',
+    tip_sync: 'Syncing...',
+    tip_no_data: 'No Data',
+    week_names: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    today: 'Today',
+    draw_issue: '#{n}',
+    win_prize: 'Won {n}',
+    wait_result: 'Waiting'
+  }
+};
+
+type Lang = 'zh' | 'en';
+type DrawData = { issue: string; date: string; week: string; red: number[]; blue: number[]; };
+type HistoryItem = { issue: string; red: number[]; blue: number[]; date: string; type: string };
 
 export default function Home() {
-  // 核心选号状态
-  const [redBalls, setRedBalls] = useState<number[]>([0,0,0,0,0,0]);
-  const [blueBall, setBlueBall] = useState<number>(0);
+  const [lang, setLang] = useState<Lang>('zh');
+  // 默认给 ssq，但在 useEffect 里会纠正
+  const [currentType, setCurrentType] = useState<string>('ssq');
+  
+  const [mainBalls, setMainBalls] = useState<number[]>([]);
+  const [subBalls, setSubBalls] = useState<number[]>([]);
   const [isRolling, setIsRolling] = useState(false);
   
-  // 数据状态
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [drawsList, setDrawsList] = useState<DrawData[]>([]);
-  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [myHistory, setMyHistory] = useState<HistoryItem[]>([]);
+  const [officialDraws, setOfficialDraws] = useState<DrawData[]>([]);
   
-  // 下一期信息
-  const [nextIssueInfo, setNextIssueInfo] = useState({ issue: '---', deadline: '---' });
-  const [currentTime, setCurrentTime] = useState<string>('');
+  const [currentWeekday, setCurrentWeekday] = useState<string>('');
+  const [deadlineStr, setDeadlineStr] = useState<string>('---');
+  const [showMobileHistory, setShowMobileHistory] = useState(false);
+  const [year, setYear] = useState('');
   
   const rollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const t = DICTIONARY[lang];
+  const rule = LOTTERY_TYPES[currentType] || LOTTERY_TYPES['ssq'];
 
+  // --- 初始化：读取用户偏好 ---
   useEffect(() => {
-    // 1. 启动时钟
-    const updateTime = () => {
-      const now = new Date();
-      setCurrentTime(now.toLocaleTimeString('zh-CN', { hour12: false }));
-    };
-    updateTime();
-    const timer = setInterval(updateTime, 1000);
+    // 1. 设置年份
+    setYear(new Date().getFullYear().toString());
 
-    // 2. 加载本地历史
-    const saved = localStorage.getItem('lottery-history');
-    if (saved) setHistory(JSON.parse(saved));
+    // 2. 读取历史选号
+    const savedHistory = localStorage.getItem('lottery-history-v2');
+    if (savedHistory) setMyHistory(JSON.parse(savedHistory));
 
-    // 3. 获取真实数据
-    fetch('/api/lottery')
-      .then(res => res.json())
-      .then(res => {
-        if (res.success && res.data && Array.isArray(res.data)) {
-          setDrawsList(res.data);
-          calculateNextIssueReal(res.data[0]);
-        }
-      })
-      .catch(err => console.error('API Error:', err))
-      .finally(() => setIsLoadingData(false));
+    // 3. 读取用户上次选择的彩种 (Persistent User Habit)
+    const savedType = localStorage.getItem('user-lottery-type');
+    if (savedType && LOTTERY_TYPES[savedType]) {
+        setCurrentType(savedType);
+    }
+  }, []); // 仅在组件挂载时执行一次
 
+  // --- 监听 currentType 变化：更新数据、保存偏好 ---
+  useEffect(() => {
+    // 1. 重置球盘
+    resetBalls(currentType);
+    
+    // 2. 更新时间信息
+    updateTimeInfo();
+
+    // 3. 拉取对应官方数据
+    fetchOfficialData(currentType);
+
+    // 4. 保存用户偏好到本地
+    localStorage.setItem('user-lottery-type', currentType);
+
+    const timer = setInterval(updateTimeInfo, 1000 * 60);
     return () => clearInterval(timer);
-  }, []);
+  }, [lang, currentType]);
 
-  // 同步历史到本地存储
+  // 同步历史记录到本地
   useEffect(() => {
-    if (history.length > 0) localStorage.setItem('lottery-history', JSON.stringify(history));
-  }, [history]);
+    if (myHistory.length > 0) localStorage.setItem('lottery-history-v2', JSON.stringify(myHistory));
+  }, [myHistory]);
 
-  // 计算下一期信息
-  const calculateNextIssueReal = (latestDraw: DrawData) => {
-    if (!latestDraw) return;
-    
-    // 简单推算下一期 (注意：跨年需特殊处理，此处简化为+1)
-    const currentIssueNum = parseInt(latestDraw.issue);
-    const nextIssue = (currentIssueNum + 1).toString();
-
-    // 推算截止时间
-    const now = new Date();
-    const currentDay = now.getDay(); // 0-6 (Sun-Sat)
-    const currentHour = now.getHours();
-
-    // 开奖日：周二(2)、周四(4)、周日(0)
-    let daysToAdd = 0;
-    const isDrawDay = [0, 2, 4].includes(currentDay);
-    
-    // 如果今天是开奖日且未过20:00，则是今天，否则找下一个开奖日
-    if (isDrawDay && currentHour < 20) {
-      daysToAdd = 0; 
+  const fetchOfficialData = (type: string) => {
+    // 只有 ssq 和 dlt 有数据源
+    if (type === 'ssq' || type === 'dlt') {
+       // 关键：切换前先清空，避免显示上一个彩种的数据
+       setOfficialDraws([]); 
+       
+       // 添加时间戳防止浏览器缓存
+       fetch(`/api/lottery?type=${type}&t=${new Date().getTime()}`)
+         .then(res => res.json())
+         .then(res => {
+           if (res.success && Array.isArray(res.data)) {
+             setOfficialDraws(res.data);
+           } else {
+             setOfficialDraws([]); // 如果数据获取失败或为空，保持空数组
+           }
+         })
+         .catch(err => {
+             console.error(err);
+             setOfficialDraws([]);
+         });
     } else {
-      if (currentDay === 0) daysToAdd = 2; // Sun -> Tue
-      else if (currentDay === 1) daysToAdd = 1; // Mon -> Tue
-      else if (currentDay === 2) daysToAdd = 2; // Tue -> Thu
-      else if (currentDay === 3) daysToAdd = 1; // Wed -> Thu
-      else if (currentDay === 4) daysToAdd = 3; // Thu -> Sun
-      else if (currentDay === 5) daysToAdd = 2; // Fri -> Sun
-      else if (currentDay === 6) daysToAdd = 1; // Sat -> Sun
+       setOfficialDraws([]);
+    }
+  };
+
+  const updateTimeInfo = () => {
+    const now = new Date();
+    setCurrentWeekday(t.week_names[now.getDay()]);
+    calculateDeadline(now);
+  };
+
+  const calculateDeadline = (now: Date) => {
+    const r = LOTTERY_TYPES[currentType] || LOTTERY_TYPES['ssq'];
+    if (r.drawDays.length === 0) {
+      setDeadlineStr('---');
+      return;
+    }
+    const currentDay = now.getDay();
+    const currentHour = now.getHours();
+    const DEADLINE_HOUR = 20;
+
+    if (r.drawDays.includes(currentDay) && currentHour < DEADLINE_HOUR) {
+      setDeadlineStr(`${t.today} ${DEADLINE_HOUR}:00`);
+      return;
     }
 
-    const nextDate = new Date();
-    nextDate.setDate(now.getDate() + daysToAdd);
-    
-    const weekMap = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    const deadlineStr = `${weekMap[nextDate.getDay()]} 20:00`;
-
-    setNextIssueInfo({ issue: nextIssue, deadline: deadlineStr });
+    let daysToAdd = 1;
+    while (daysToAdd <= 7) {
+      const nextDayIndex = (currentDay + daysToAdd) % 7;
+      if (r.drawDays.includes(nextDayIndex)) {
+        const targetDate = new Date();
+        targetDate.setDate(now.getDate() + daysToAdd);
+        const weekName = t.week_names[targetDate.getDay()];
+        setDeadlineStr(`${weekName} ${DEADLINE_HOUR}:00`);
+        return;
+      }
+      daysToAdd++;
+    }
   };
 
-  // 真随机算法
-  const getTrueRandom = (min: number, max: number, exclude: number[] = []) => {
-    const range = max - min + 1;
-    const array = new Uint32Array(1);
-    let randomNum;
-    do {
-      window.crypto.getRandomValues(array);
-      randomNum = min + (array[0] % range);
-    } while (exclude.includes(randomNum));
-    return randomNum;
-  };
-
-  // 计算参考奖级 (仅用于显示“若买上期可中XXX”)
-  const calculatePrize = (red: number[], blue: number): PrizeLevel => {
-    if (drawsList.length === 0) return 0;
-    const latest = drawsList[0];
-    const redHits = red.filter(r => latest.red.includes(r)).length;
-    const blueHit = blue === latest.blue;
-
-    if (redHits === 6 && blueHit) return 1;
-    if (redHits === 6 && !blueHit) return 2;
-    if (redHits === 5 && blueHit) return 3;
-    if ((redHits === 5 && !blueHit) || (redHits === 4 && blueHit)) return 4;
-    if ((redHits === 4 && !blueHit) || (redHits === 3 && blueHit)) return 5;
-    if (blueHit) return 6;
-    return 0;
+  const resetBalls = (type: string) => {
+    const r = LOTTERY_TYPES[type] || LOTTERY_TYPES['ssq'];
+    setMainBalls(Array(r.redCount).fill(0));
+    setSubBalls(Array(r.blueCount).fill(0));
   };
 
   const startRolling = () => {
     if (isRolling) return;
     setIsRolling(true);
+
     rollIntervalRef.current = setInterval(() => {
-       setRedBalls(Array(6).fill(0).map(() => Math.floor(Math.random() * 33) + 1));
-       setBlueBall(Math.floor(Math.random() * 16) + 1);
+       setMainBalls(Array(rule.redCount).fill(0).map(() => Math.floor(Math.random() * rule.redMax) + 1));
+       if (rule.hasSub) {
+         setSubBalls(Array(rule.blueCount).fill(0).map(() => Math.floor(Math.random() * rule.blueMax) + 1));
+       }
     }, 50);
 
     setTimeout(() => {
       if (rollIntervalRef.current) clearInterval(rollIntervalRef.current);
-      const finalReds: number[] = [];
-      while (finalReds.length < 6) {
-        const num = getTrueRandom(1, 33, finalReds);
-        finalReds.push(num);
-      }
-      finalReds.sort((a, b) => a - b);
-      const finalBlue = getTrueRandom(1, 16);
-
-      setRedBalls(finalReds);
-      setBlueBall(finalBlue);
-      setIsRolling(false);
-
-      const prizeLevel = calculatePrize(finalReds, finalBlue);
-      // 只有中大奖才撒花，增加稀缺感
-      if (prizeLevel > 0 && prizeLevel <= 3) triggerConfetti();
-
-      const newRecord: HistoryItem = {
-        red: finalReds, 
-        blue: finalBlue, 
-        date: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        prizeLevel, 
-        winIssue: prizeLevel > 0 && drawsList.length > 0 ? drawsList[0].issue : undefined, 
-        forIssue: nextIssueInfo.issue
+      
+      const finalMains: number[] = [];
+      const array = new Uint32Array(1);
+      const getRand = (max: number, exclude: number[]) => {
+          let n; do { window.crypto.getRandomValues(array); n = 1 + (array[0] % max); } while (exclude.includes(n)); return n;
       };
 
-      setHistory(prev => [newRecord, ...prev].slice(0, 50));
+      while (finalMains.length < rule.redCount) finalMains.push(getRand(rule.redMax, finalMains));
+      finalMains.sort((a, b) => a - b);
+
+      const finalSubs: number[] = [];
+      if (rule.hasSub) {
+        while (finalSubs.length < rule.blueCount) finalSubs.push(getRand(rule.blueMax, finalSubs));
+        finalSubs.sort((a, b) => a - b);
+      }
+
+      setMainBalls(finalMains);
+      setSubBalls(finalSubs);
+      setIsRolling(false);
+      triggerConfetti();
+
+      // 计算目标期号
+      let targetIssue = '---';
+      if (officialDraws.length > 0) {
+          targetIssue = (parseInt(officialDraws[0].issue) + 1).toString();
+      }
+
+      const newRecord: HistoryItem = {
+        issue: targetIssue,
+        red: finalMains, 
+        blue: finalSubs, 
+        date: new Date().toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', {hour: '2-digit', minute:'2-digit'}),
+        type: currentType
+      };
+      setMyHistory(prev => [newRecord, ...prev].slice(0, 50));
     }, 800);
   };
 
   const triggerConfetti = () => {
-    confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#ef4444', '#3b82f6', '#fbbf24'] });
+    confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
   };
 
-  // 简单的奖级文本
-  const getPrizeText = (level: PrizeLevel) => {
-    const map = ['', '一等奖', '二等奖', '三等奖', '四等奖', '五等奖', '六等奖'];
-    return map[level] || '';
+  const checkWin = (userRed: number[], userBlue: number[], officialDraw: DrawData | undefined, type: string) => {
+    if (!officialDraw) return { isMatch: false, hitsRed: [], hitsBlue: [], prize: '' };
+
+    const hitsRed = userRed.filter(r => officialDraw.red.includes(r));
+    const hitsBlue = userBlue.filter(b => officialDraw.blue.includes(b));
+    
+    const r = hitsRed.length;
+    const b = hitsBlue.length;
+    let prize = '';
+
+    if (type === 'ssq') {
+        if (r===6 && b===1) prize = '一等奖';
+        else if (r===6 && b===0) prize = '二等奖';
+        else if (r===5 && b===1) prize = '三等奖';
+        else if ((r===5 && b===0) || (r===4 && b===1)) prize = '四等奖';
+        else if ((r===4 && b===0) || (r===3 && b===1)) prize = '五等奖';
+        else if (b===1) prize = '六等奖';
+    } else if (type === 'dlt') {
+        if (r===5 && b===2) prize = '一等奖';
+        else if (r===5 && b===1) prize = '二等奖';
+        else if (r===5 && b===0) prize = '三等奖';
+        else if (r===4 && b===2) prize = '四等奖';
+        else if (r===4 && b===1) prize = '五等奖';
+        else if (r===3 && b===2) prize = '六等奖';
+        else if (r===4 && b===0) prize = '七等奖';
+        else if ((r===3 && b===1) || (r===2 && b===2)) prize = '八等奖';
+        else if ((r===3 && b===0) || (r===2 && b===1) || (r===1 && b===2) || (r===0 && b===2)) prize = '九等奖';
+    }
+
+    return { isMatch: true, hitsRed, hitsBlue, prize };
+  };
+
+  const renderHistoryItem = (item: HistoryItem, idx: number) => {
+    const itemRule = LOTTERY_TYPES[item.type] || LOTTERY_TYPES['ssq'];
+    const officialData = officialDraws.find(d => d.issue === item.issue);
+    const result = checkWin(item.red, item.blue, officialData, item.type);
+
+    return (
+      <div key={idx} className="px-4 py-3 border-b border-slate-50 flex justify-between items-center hover:bg-slate-50 transition-colors">
+        <div className="w-full">
+          <div className="flex justify-between items-center mb-2">
+             <div className="flex items-center gap-2">
+                <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 rounded font-bold uppercase">
+                  {/* @ts-ignore */}
+                  {t[itemRule.nameKey]}
+                </span>
+                <span className="text-xs font-bold text-slate-700">
+                  {item.issue !== '---' ? t.draw_issue.replace('{n}', item.issue) : ''}
+                </span>
+             </div>
+             {result.prize ? (
+                 <div className="flex items-center gap-1 text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full border border-red-100 animate-in zoom-in">
+                    <Award className="w-3 h-3" />
+                    {result.prize}
+                 </div>
+             ) : (
+                 <span className="text-[10px] text-slate-300">
+                    {officialData ? '未中奖' : item.date}
+                 </span>
+             )}
+          </div>
+          <div className="flex gap-1.5 text-sm font-mono font-bold items-center">
+            {item.red.map((n, i) => {
+                const isHit = result.hitsRed.includes(n);
+                return (
+                    <div key={`r-${i}`} className={`flex items-center justify-center rounded-full w-6 h-6 text-xs ${isHit ? 'bg-red-500 text-white shadow-sm' : 'text-slate-600 bg-transparent'}`}>{n.toString().padStart(2, '0')}</div>
+                )
+            })}
+            {item.blue.length > 0 && <span className="text-slate-300 mx-1">|</span>}
+            {item.blue.map((n, i) => {
+                const isHit = result.hitsBlue.includes(n);
+                return (
+                    <div key={`b-${i}`} className={`flex items-center justify-center rounded-full w-6 h-6 text-xs ${isHit ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-500 bg-transparent'}`}>{n.toString().padStart(2, '0')}</div>
+                )
+            })}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
-    <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-center overflow-hidden font-sans text-slate-900">
+    <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-start sm:justify-center overflow-hidden font-sans text-slate-900">
       
-      {/* 核心容器 */}
-      <div className="w-full max-w-[1300px] h-full p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-6">
-        
-        {/* === 左侧栏：官方历史 (纯净版) === */}
-        <aside className="hidden lg:flex flex-col h-full overflow-hidden order-1">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
-            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
-               <div className="flex items-center gap-2">
-                 <Calendar className="w-4 h-4 text-blue-500" />
-                 <h3 className="text-slate-700 font-bold text-sm">官方历史数据</h3>
-               </div>
+      <header className="w-full bg-white border-b border-slate-200 px-3 py-2 shrink-0 flex justify-between items-center shadow-sm z-20">
+        <div className="flex items-center gap-2" onClick={() => triggerConfetti()}>
+           <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-yellow-500" />
+           <div className="flex items-center gap-1.5">
+             <h1 className="text-base sm:text-lg font-black tracking-tighter text-slate-800 whitespace-nowrap">{t.title}</h1>
+             <span className="text-[10px] font-bold bg-yellow-400 text-yellow-950 px-1.5 rounded-md shadow-sm border border-yellow-300">{year}</span>
+           </div>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+           <button onClick={() => setShowMobileHistory(true)} className="lg:hidden p-1.5 bg-slate-100 rounded-md text-slate-600 active:bg-slate-200"><List className="w-4 h-4" /></button>
+           <div className="relative group">
+              <select value={currentType} onChange={(e) => setCurrentType(e.target.value)} className="appearance-none bg-slate-100 border border-slate-200 text-slate-700 text-xs sm:text-sm font-bold py-1.5 pl-2 pr-7 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-24 sm:w-auto truncate">
+                {Object.values(LOTTERY_TYPES).map(l => (
+                  // @ts-ignore
+                  <option key={l.id} value={l.id}>{t[l.nameKey]}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"/>
+           </div>
+           <button onClick={() => setLang(prev => prev === 'zh' ? 'en' : 'zh')} className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-600"><Globe className="w-4 h-4 sm:w-5 sm:h-5" /></button>
+        </div>
+      </header>
+
+      <div className="flex-1 w-full max-w-[1300px] p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-4 sm:gap-6 overflow-hidden">
+        <aside className="hidden lg:flex flex-col h-full overflow-hidden order-1 bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
+               <Calendar className="w-4 h-4 text-blue-500" />
+               <h3 className="text-slate-700 font-bold text-sm">{t.official_title}</h3>
             </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {isLoadingData ? (
-                 <div className="p-8 text-center text-slate-400 text-xs"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2"/>数据同步中...</div>
-              ) : drawsList.map((draw, idx) => (
-                <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                   <div className="flex justify-between items-center mb-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-700">第 {draw.issue} 期</span>
-                        <span className="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">{draw.week}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">{draw.date}</span>
-                   </div>
-                   <div className="flex gap-1 text-sm font-mono font-bold">
-                      {draw.red.map((n, i) => (
-                        <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>
-                      ))}
-                      <span className="text-blue-500">{draw.blue.toString().padStart(2, '0')}</span>
-                   </div>
-                </div>
-              ))}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
+                {(currentType !== 'ssq' && currentType !== 'dlt') ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>
+                ) : officialDraws.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>
+                ) : officialDraws.map((draw, idx) => (
+                    <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                        <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
+                        <div className="flex gap-1 text-sm font-mono font-bold">
+                            {draw.red.map((n, i) => <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>)}
+                            {draw.blue.map((n, i) => <span key={`b-${i}`} className="text-blue-500 ml-1">{n.toString().padStart(2, '0')}</span>)}
+                        </div>
+                    </div>
+                ))}
             </div>
-          </div>
         </aside>
 
-        {/* === 中间栏：操作台 === */}
         <section className="flex flex-col h-full min-h-0 overflow-hidden order-2 relative">
-          
-          {/* Logo */}
-          <div className="shrink-0 mb-4 text-center cursor-pointer select-none group" onClick={triggerConfetti}>
-             <div className="relative inline-block">
-                <div className="relative flex items-center justify-center gap-2">
-                   <Sparkles className="w-8 h-8 text-yellow-500 animate-bounce" style={{ animationDuration: '3s' }} />
-                   <h1 className="text-3xl sm:text-4xl font-black text-slate-800 tracking-tighter drop-shadow-sm">
-                     欧气选号机
-                   </h1>
-                   <Zap className="w-6 h-6 text-blue-500 rotate-12 group-hover:rotate-45 transition-transform" />
-                </div>
-             </div>
-          </div>
-
-          {/* 信息仪表盘 */}
-          <div className="shrink-0 w-full bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-4 mb-4 text-white shadow-xl flex justify-between items-center relative overflow-hidden border border-slate-700">
+          <div className="shrink-0 w-full bg-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-4 mb-3 sm:mb-4 text-white shadow-lg flex justify-between items-center relative overflow-hidden">
              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 pointer-events-none"></div>
-             
-             {/* 左：期号 */}
-             <div className="z-10">
-               <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1">
-                 <RefreshCw className="w-3 h-3 animate-spin"/> 当前期号
-               </div>
-               <div className="text-2xl font-black tracking-tight text-white">
-                 第 <span className="text-yellow-400">{nextIssueInfo.issue}</span> 期
-               </div>
+             <div className="z-10 flex-1 min-w-0">
+               <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><RefreshCw className="w-3 h-3"/> {t.wait_draw}</div>
+               <div className="text-lg sm:text-2xl font-black tracking-tight text-white truncate"><span className="text-yellow-400">{(currentType === 'ssq' || currentType === 'dlt') && officialDraws.length > 0 ? t.draw_issue.replace('{n}', (parseInt(officialDraws[0].issue) + 1).toString().slice(-3)) : '---'}</span></div>
              </div>
-
-             {/* 中：时间 */}
-             <div className="z-10 flex flex-col items-center justify-center">
-                <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-0.5">Current Time</div>
-                <div className="text-xl font-mono font-bold text-slate-200 tabular-nums tracking-widest flex items-center gap-2">
-                  <Timer className="w-4 h-4 text-slate-500" />
-                  {currentTime}
-                </div>
+             <div className="z-10 flex-1 flex flex-col items-center border-l border-r border-slate-700/50 px-1 mx-1 sm:px-2 sm:mx-2">
+                <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1"><Clock className="w-3 h-3"/> {t.deadline}</div>
+                <div className="text-sm sm:text-lg font-bold text-white whitespace-nowrap">{deadlineStr}</div>
              </div>
-
-             {/* 右：截止 */}
-             <div className="z-10 text-right">
-               <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-end gap-1">
-                 <Clock className="w-3 h-3"/> 截止时间
-               </div>
-               <div className="text-base font-bold text-white flex items-center gap-1">
-                 {nextIssueInfo.deadline}
-                 <AlertCircle className="w-4 h-4 text-red-400" />
-               </div>
+             <div className="z-10 flex-1 flex flex-col items-end">
+                <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-0.5">{t.weekday_title}</div>
+                <div className="text-lg sm:text-xl font-bold text-slate-200 flex items-center gap-1"><CalendarDays className="w-4 h-4 text-slate-500 hidden sm:block" />{currentWeekday}</div>
              </div>
           </div>
 
-          {/* 选号机器 */}
-          <div className="shrink-0 bg-white p-4 sm:p-6 rounded-[2rem] shadow-lg border-4 border-slate-100 w-full mb-4 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-red-100/50 to-orange-100/50 rounded-full -mr-20 -mt-20 z-0"></div>
-            <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-blue-50 to-indigo-50 rounded-full -ml-16 -mb-16 z-0"></div>
-            <div className="relative z-10 flex flex-col items-center">
-              <div className="flex flex-wrap justify-center gap-2 sm:gap-4 mb-6 min-h-[50px]">
-                {redBalls.map((num, idx) => (
-                  <div key={`red-${idx}`} className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-lg sm:text-2xl font-bold shadow-[inset_-2px_-2px_6px_rgba(0,0,0,0.2)] transition-all duration-100 ${isRolling ? 'scale-110 bg-red-400 blur-[0.5px]' : 'scale-100 bg-gradient-to-br from-red-500 to-red-600'} text-white ring-4 ring-red-50`}>
-                    {num === 0 ? '?' : num.toString().padStart(2, '0')}
-                  </div>
+          <div className="shrink-0 bg-white p-4 sm:p-8 rounded-2xl sm:rounded-[1.5rem] shadow-sm border border-slate-200 w-full mb-3 sm:mb-4 relative overflow-hidden flex flex-col items-center justify-center min-h-[180px] sm:min-h-[200px]">
+             <div className="flex flex-wrap justify-center gap-2 sm:gap-3 mb-6 sm:mb-8 max-w-full">
+                {mainBalls.map((num, idx) => (
+                  <div key={`m-${idx}`} className={`w-10 h-10 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-2xl font-black shadow-inner transition-all duration-100 text-white ${rule.mainColor} ${isRolling ? 'scale-105 blur-[0.5px]' : ''}`}>{num === 0 ? '?' : num.toString().padStart(2, '0')}</div>
                 ))}
-                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-lg sm:text-2xl font-bold shadow-[inset_-2px_-2px_6px_rgba(0,0,0,0.2)] ml-2 transition-all duration-100 ${isRolling ? 'scale-110 bg-blue-400 blur-[0.5px]' : 'scale-100 bg-gradient-to-br from-blue-500 to-blue-600'} text-white ring-4 ring-blue-50`}>
-                  {blueBall === 0 ? '?' : blueBall.toString().padStart(2, '0')}
-                </div>
-              </div>
-              <button onClick={startRolling} disabled={isRolling} className="relative w-full sm:w-56 h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl font-black text-lg shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 disabled:scale-100 disabled:opacity-80 transition-all overflow-hidden flex items-center justify-center gap-3 group">
+                {subBalls.map((num, idx) => (
+                  <div key={`s-${idx}`} className={`w-10 h-10 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-2xl font-black shadow-inner transition-all duration-100 text-white ${rule.subColor} ${isRolling ? 'scale-105 blur-[0.5px]' : ''}`}>{num === 0 ? '?' : num.toString().padStart(2, '0')}</div>
+                ))}
+             </div>
+             <button onClick={startRolling} disabled={isRolling} className="relative w-full sm:w-64 h-12 sm:h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-black text-base sm:text-lg shadow-xl active:scale-95 disabled:opacity-80 transition-all flex items-center justify-center gap-2 group overflow-hidden">
                  <div className="absolute top-0 -left-[100%] w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 group-hover:animate-shine" />
-                 <RefreshCw className={`w-5 h-5 ${isRolling ? 'animate-spin' : ''}`} />
-                 {isRolling ? '注入欧气' : '立即随机'}
-              </button>
-            </div>
+                 <Zap className={`w-5 h-5 ${isRolling ? 'animate-pulse' : ''}`} />
+                 {isRolling ? t.action_rolling : t.action_roll}
+             </button>
           </div>
 
-          {/* 我的记录 (清爽版) */}
           <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
-            <div className="bg-slate-50/50 px-5 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
-               <div className="flex items-center gap-2">
-                 <History className="w-4 h-4 text-slate-500" />
-                 <span className="text-slate-700 font-bold text-sm">我的选号记录</span>
-               </div>
-               {history.length > 0 && (
-                 <button onClick={() => {setHistory([]); localStorage.removeItem('lottery-history')}} className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors">
-                   <Trash2 className="w-3 h-3"/> 清空
-                 </button>
-               )}
+            <div className="bg-slate-50/50 px-4 py-3 border-b border-slate-100 flex justify-between items-center shrink-0">
+               <div className="flex items-center gap-2"><History className="w-4 h-4 text-slate-500" /><span className="text-slate-700 font-bold text-sm">{t.history_title}</span></div>
+               {myHistory.length > 0 && <button onClick={() => {setMyHistory([]); localStorage.removeItem('lottery-history-v2')}} className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1"><Trash2 className="w-3 h-3"/> {t.clear}</button>}
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {history.length === 0 && (
-                <div className="text-center text-slate-300 text-sm py-10">暂无记录</div>
-              )}
-              {history.map((item, idx) => (
-                <div key={idx} className={`px-5 py-3 flex justify-between items-center hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0`}>
-                  <div className="flex flex-col gap-1 w-full">
-                    <div className="flex justify-between items-center">
-                       <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-mono">第{item.forIssue}期</span>
-                       <span className="text-[10px] text-slate-300">{item.date}</span>
-                    </div>
-                    <div className="flex gap-2 text-base font-mono tracking-tight font-bold">
-                      {item.red.map(n => <span key={n} className="text-slate-700">{n.toString().padStart(2, '0')}</span>)}
-                      <span className="text-slate-200">|</span>
-                      <span className="text-blue-500">{item.blue.toString().padStart(2, '0')}</span>
-                    </div>
-                    {/* 仅保留参考信息，去掉夸张的图标 */}
-                    {item.prizeLevel > 0 && (
-                       <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
-                          <span>参考上期({item.winIssue}): {getPrizeText(item.prizeLevel)}</span>
-                       </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+              {myHistory.length === 0 && <div className="text-center text-slate-300 text-sm py-10">{t.empty_history}</div>}
+              {myHistory.map((item, idx) => renderHistoryItem(item, idx))}
             </div>
           </div>
         </section>
 
-        {/* === 右侧栏：广告 === */}
         <aside className="hidden lg:flex flex-col h-full order-3 overflow-hidden">
-          <div className="h-full bg-slate-100 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400">
-             <span className="text-sm font-bold">AD SPACE</span>
-             <span className="text-xs">Full Height Skyscraper</span>
-             <span className="text-[10px] mt-2">Google Adsense</span>
-          </div>
+          <div className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs">AD SPACE</div>
         </aside>
       </div>
+
+      {showMobileHistory && (
+        <div className="fixed inset-0 z-50 lg:hidden flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full h-[80%] sm:h-[600px] sm:w-[500px] sm:rounded-2xl rounded-t-2xl flex flex-col shadow-2xl animate-in slide-in-from-bottom duration-300">
+             <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                <div className="flex items-center gap-2"><Calendar className="w-5 h-5 text-blue-500" /><h3 className="font-bold text-slate-800">{t.official_title}</h3></div>
+                <button onClick={() => setShowMobileHistory(false)} className="p-2 bg-slate-100 rounded-full text-slate-500"><X className="w-5 h-5" /></button>
+             </div>
+             <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
+                {(currentType !== 'ssq' && currentType !== 'dlt') ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>
+                ) : officialDraws.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>
+                ) : officialDraws.map((draw, idx) => (
+                    <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                        <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
+                        <div className="flex gap-1 text-sm font-mono font-bold">
+                            {draw.red.map((n, i) => <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>)}
+                            {draw.blue.map((n, i) => <span key={`b-${i}`} className="text-blue-500 ml-1">{n.toString().padStart(2, '0')}</span>)}
+                        </div>
+                    </div>
+                ))}
+             </div>
+          </div>
+        </div>
+      )}
 
       <style jsx global>{`
         @keyframes shine { 100% { left: 125%; } }
