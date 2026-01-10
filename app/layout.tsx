@@ -33,7 +33,7 @@ export default function RootLayout({
     <html lang="zh-CN">
       <head>
         {/* 预留 Google Adsense 代码的位置 */}
-        {/* <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXX" crossOrigin="anonymous"></script> */}
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8008172334018039" crossOrigin="anonymous"></script>
       </head>
       <body className={inter.className}>
         {children}

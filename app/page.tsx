@@ -487,7 +487,7 @@ export default function Home() {
           <div className="h-full bg-slate-50 border border-slate-100 rounded-xl overflow-hidden flex items-center justify-center text-slate-300 text-xs">
               <ins className="adsbygoogle"
                    style={{ display: 'block', width: '100%', height: '100%' }}
-                   data-ad-client="ca-pub-XXXXXXXXXXXXXXXX" 
+                   data-ad-client="ca-pub-8008172334018039" 
                    data-ad-slot="XXXXXXXXXX"
                    data-ad-format="auto"
                    data-full-width-responsive="true"></ins>
