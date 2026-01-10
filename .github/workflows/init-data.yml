@@ -32,7 +32,7 @@ jobs:
           if [[ -n $(git status --porcelain data/) ]]; then
             echo "⚡ 数据已重新初始化，正在提交..."
             git add data/*.json
-            git commit -m "chore(data): initialize lottery history [skip ci]"
+            git commit -m "chore(data): initialize lottery history"
             git push
           else
             echo "✅ 数据没有变化。"

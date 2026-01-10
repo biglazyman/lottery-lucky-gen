@@ -42,7 +42,7 @@ jobs:
           if [[ -n $(git status --porcelain data/) ]]; then
             echo "⚡ 发现数据更新，正在提交..."
             git add data/*.json
-            git commit -m "chore(data): auto update lottery results [skip ci]"
+            git commit -m "chore(data): auto update lottery results"
             git push
           else
             echo "✅ 数据已是最新，无需提交。"
