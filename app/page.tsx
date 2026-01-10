@@ -85,7 +85,6 @@ type HistoryItem = { issue: string; red: number[]; blue: number[]; date: string;
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>('zh');
-  // 默认给 ssq，但在 useEffect 里会纠正
   const [currentType, setCurrentType] = useState<string>('ssq');
   
   const [mainBalls, setMainBalls] = useState<number[]>([]);
@@ -94,6 +93,8 @@ export default function Home() {
   
   const [myHistory, setMyHistory] = useState<HistoryItem[]>([]);
   const [officialDraws, setOfficialDraws] = useState<DrawData[]>([]);
+  // --- 新增: 明确的加载状态 ---
+  const [isDataLoading, setIsDataLoading] = useState(false);
   
   const [currentWeekday, setCurrentWeekday] = useState<string>('');
   const [deadlineStr, setDeadlineStr] = useState<string>('---');
@@ -104,67 +105,62 @@ export default function Home() {
   const t = DICTIONARY[lang];
   const rule = LOTTERY_TYPES[currentType] || LOTTERY_TYPES['ssq'];
 
-  // --- 初始化：读取用户偏好 ---
   useEffect(() => {
-    // 1. 设置年份
     setYear(new Date().getFullYear().toString());
-
-    // 2. 读取历史选号
     const savedHistory = localStorage.getItem('lottery-history-v2');
     if (savedHistory) setMyHistory(JSON.parse(savedHistory));
 
-    // 3. 读取用户上次选择的彩种 (Persistent User Habit)
     const savedType = localStorage.getItem('user-lottery-type');
     if (savedType && LOTTERY_TYPES[savedType]) {
         setCurrentType(savedType);
     }
-  }, []); // 仅在组件挂载时执行一次
+  }, []);
 
-  // --- 监听 currentType 变化：更新数据、保存偏好 ---
   useEffect(() => {
-    // 1. 重置球盘
     resetBalls(currentType);
-    
-    // 2. 更新时间信息
     updateTimeInfo();
-
-    // 3. 拉取对应官方数据
+    
+    // 每次切换类型，触发拉取
     fetchOfficialData(currentType);
 
-    // 4. 保存用户偏好到本地
     localStorage.setItem('user-lottery-type', currentType);
 
     const timer = setInterval(updateTimeInfo, 1000 * 60);
     return () => clearInterval(timer);
   }, [lang, currentType]);
 
-  // 同步历史记录到本地
   useEffect(() => {
     if (myHistory.length > 0) localStorage.setItem('lottery-history-v2', JSON.stringify(myHistory));
   }, [myHistory]);
 
-  const fetchOfficialData = (type: string) => {
-    // 只有 ssq 和 dlt 有数据源
-    if (type === 'ssq' || type === 'dlt') {
-       // 关键：切换前先清空，避免显示上一个彩种的数据
-       setOfficialDraws([]); 
-       
-       // 添加时间戳防止浏览器缓存
-       fetch(`/api/lottery?type=${type}&t=${new Date().getTime()}`)
-         .then(res => res.json())
-         .then(res => {
-           if (res.success && Array.isArray(res.data)) {
-             setOfficialDraws(res.data);
-           } else {
-             setOfficialDraws([]); // 如果数据获取失败或为空，保持空数组
-           }
-         })
-         .catch(err => {
-             console.error(err);
-             setOfficialDraws([]);
-         });
-    } else {
+  // --- 修复后的数据拉取逻辑 ---
+  const fetchOfficialData = async (type: string) => {
+    // 1. 如果是不支持 API 的彩种，直接清空并停止
+    if (type !== 'ssq' && type !== 'dlt') {
        setOfficialDraws([]);
+       return;
+    }
+
+    // 2. 开始加载：设置 loading 为 true
+    setIsDataLoading(true);
+    setOfficialDraws([]); // 清空旧数据，防止混淆
+
+    try {
+      // 加个时间戳防缓存
+      const res = await fetch(`/api/lottery?type=${type}&t=${new Date().getTime()}`);
+      const json = await res.json();
+      
+      if (json.success && Array.isArray(json.data)) {
+        setOfficialDraws(json.data);
+      } else {
+        setOfficialDraws([]);
+      }
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setOfficialDraws([]);
+    } finally {
+      // 3. 无论成功失败，都必须结束 loading 状态
+      setIsDataLoading(false);
     }
   };
 
@@ -243,7 +239,6 @@ export default function Home() {
       setIsRolling(false);
       triggerConfetti();
 
-      // 计算目标期号
       let targetIssue = '---';
       if (officialDraws.length > 0) {
           targetIssue = (parseInt(officialDraws[0].issue) + 1).toString();
@@ -345,6 +340,35 @@ export default function Home() {
     );
   };
 
+  // --- 复用官方列表渲染 ---
+  const renderOfficialList = () => {
+    // 1. 如果不是 SSQ 或 DLT，显示“无数据”
+    if (currentType !== 'ssq' && currentType !== 'dlt') {
+        return <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>;
+    }
+
+    // 2. 如果正在加载，显示转圈
+    if (isDataLoading) {
+        return <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>;
+    }
+
+    // 3. 如果加载完了但没数据，显示“暂无数据” (而不是一直转圈)
+    if (officialDraws.length === 0) {
+        return <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>;
+    }
+
+    // 4. 有数据，显示列表
+    return officialDraws.map((draw, idx) => (
+        <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
+            <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
+            <div className="flex gap-1 text-sm font-mono font-bold">
+                {draw.red.map((n, i) => <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>)}
+                {draw.blue.map((n, i) => <span key={`b-${i}`} className="text-blue-500 ml-1">{n.toString().padStart(2, '0')}</span>)}
+            </div>
+        </div>
+    ));
+  };
+
   return (
     <main className="fixed inset-0 w-full bg-slate-50 flex flex-col items-center justify-start sm:justify-center overflow-hidden font-sans text-slate-900">
       
@@ -372,25 +396,15 @@ export default function Home() {
       </header>
 
       <div className="flex-1 w-full max-w-[1300px] p-3 sm:p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_260px] gap-4 sm:gap-6 overflow-hidden">
+        
+        {/* Left: Official History */}
         <aside className="hidden lg:flex flex-col h-full overflow-hidden order-1 bg-white rounded-2xl border border-slate-200 shadow-sm">
             <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center gap-2">
                <Calendar className="w-4 h-4 text-blue-500" />
                <h3 className="text-slate-700 font-bold text-sm">{t.official_title}</h3>
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
-                {(currentType !== 'ssq' && currentType !== 'dlt') ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>
-                ) : officialDraws.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>
-                ) : officialDraws.map((draw, idx) => (
-                    <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                        <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
-                        <div className="flex gap-1 text-sm font-mono font-bold">
-                            {draw.red.map((n, i) => <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>)}
-                            {draw.blue.map((n, i) => <span key={`b-${i}`} className="text-blue-500 ml-1">{n.toString().padStart(2, '0')}</span>)}
-                        </div>
-                    </div>
-                ))}
+                {renderOfficialList()}
             </div>
         </aside>
 
@@ -453,19 +467,7 @@ export default function Home() {
                 <button onClick={() => setShowMobileHistory(false)} className="p-2 bg-slate-100 rounded-full text-slate-500"><X className="w-5 h-5" /></button>
              </div>
              <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
-                {(currentType !== 'ssq' && currentType !== 'dlt') ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2 min-h-[200px]"><AlertCircle className="w-8 h-8 opacity-20"/>{t.tip_no_data}</div>
-                ) : officialDraws.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center"><Loader2 className="w-5 h-5 animate-spin mb-2"/>{t.tip_sync}</div>
-                ) : officialDraws.map((draw, idx) => (
-                    <div key={idx} className="p-3 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                        <div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-slate-700">No. {draw.issue}</span><span className="text-[10px] text-slate-400">{draw.date}</span></div>
-                        <div className="flex gap-1 text-sm font-mono font-bold">
-                            {draw.red.map((n, i) => <span key={i} className="text-red-500">{n.toString().padStart(2, '0')}</span>)}
-                            {draw.blue.map((n, i) => <span key={`b-${i}`} className="text-blue-500 ml-1">{n.toString().padStart(2, '0')}</span>)}
-                        </div>
-                    </div>
-                ))}
+                {renderOfficialList()}
              </div>
           </div>
         </div>

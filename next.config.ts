@@ -18,6 +18,10 @@ const withPWA = withPWAInit({
 const nextConfig: NextConfig = {
   // 这里可以放 Next.js 的其他配置
   // 注意：swcMinify 默认是 true，不需要显式写出来
+  outputFileTracingIncludes: {
+      // 键名是你的 API 路由路径
+      '/api/lottery': ['./data/**/*'], 
+  },
 };
 
 // 3. 导出包了一层 PWA 的配置
