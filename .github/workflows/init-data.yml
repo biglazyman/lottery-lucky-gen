@@ -1,0 +1,39 @@
+name: Manual Init Data (Reset History)
+
+# 仅手动触发
+on:
+  workflow_dispatch:
+
+jobs:
+  init-data:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # 运行刚刚写的初始化脚本
+      - name: Run Init Script
+        run: node scripts/init.js
+
+      # 提交生成的 json 文件
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'GitHub Action Bot'
+          git config --global user.email 'action@github.com'
+          
+          if [[ -n $(git status --porcelain data/) ]]; then
+            echo "⚡ 数据已重新初始化，正在提交..."
+            git add data/*.json
+            git commit -m "chore(data): initialize lottery history [skip ci]"
+            git push
+          else
+            echo "✅ 数据没有变化。"
+          fi
